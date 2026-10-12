@@ -1,6 +1,12 @@
-DISCORD ARCHIVE STUDIO 1.0.1 — WINDOWS x64
+DISCORD ARCHIVE STUDIO 1.1.0 — WINDOWS x64
 
 START
+The VBS first checks its own folder and immediate parent. If separated from the
+app, it searches the parent tree through six subfolder levels, skipping private
+data, runtime folders and junctions. Multiple copies require an explicit choice.
+Moving the whole extracted folder keeps the app and Data together; a custom
+export destination remains the folder you selected until you change it.
+
 1. Extract the entire Portable ZIP to a normal local folder.
 2. Double-click OPEN-DISCORD-ARCHIVE.vbs (or the .bat fallback).
 3. The included Python runtime starts a local service and opens an Edge/Chrome
@@ -26,6 +32,13 @@ BROWSER CONNECTION — ONE-TIME SETUP
    shown in Archive Studio Settings. Disconnect/switch account revokes pairing.
 
 PACE AND SCHEDULES
+History lists saved conversations and counts, including unfinished batches.
+Read messages opens the local transcript. Schedules has search, checkboxes,
+Select filtered, Pause/Enable selected, Remove selected, Clear all and Undo.
+Removing a server default removes its inherited schedules, preserving explicit
+overrides. Removed channels will not be recreated by the server default until
+you add them again. Saved messages, current ZIPs and queued exports stay intact.
+
 Export pacing and rescan timing are separate.
 - Default: 1,000 scanned messages per batch, a 5-minute cooldown, and at least
   2.5 seconds between API requests. One message reader runs at a time.
@@ -73,6 +86,26 @@ Restored access requires an explicit Retry/Resume; schedules must be re-enabled.
 There is still a race if access changes after a successful fresh inventory check.
 
 LIBRARY AND IDENTITY
+- Queue tray and Queue page show every task in bounded scrollable lists.
+  Drag the grip to move any waiting/queued/paused/blocked task; arrow controls
+  provide keyboard movement. Active exports stay fixed, including during races.
+  The page reserves space for the queue so it cannot cover configuration fields.
+- Search server names/IDs in Full and Compact views. The picker filters cached
+  names locally and supports arrows, Enter and Escape without a network lookup.
+- Preview and Library use a shared continuous transcript border. Preview reads
+  50 local messages per page, with Load older saved messages; its attachment
+  rows show file metadata even for messages with no text. No remote media loads.
+- People on the left menu searches names, usernames and IDs for DM contacts.
+  Select individual people, Select filtered, Queue selected, or Queue filtered.
+  Friends only uses your actual relationship inventory; friendship is never
+  inferred from old messages. Missing DMs stay disabled. Open such a chat normally
+  in Discord and refresh contacts; Studio never creates or probes a missing DM.
+  Available group DMs are optional and shared chats are queued only once.
+- People reuses export formats, filters and gentle batch settings, clears hidden
+  person-only/full-rescan flags, and preserves existing job checkpoints. Optional
+  adaptive schedules are added only where no channel/server schedule exists.
+  Contact metadata is cached by account for ten minutes and refreshed on demand.
+  Friend filters and selected contacts persist in this browser for that account.
 - Attachments and images download ONLY after you select their checkboxes in
   Library and click Download selected. This queue waits for text jobs to finish.
   Default per-file cap: 10 MB (decimal); adjustable 1–100 MB. Videos always have

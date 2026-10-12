@@ -2,7 +2,34 @@
 
 ## Verified
 
-- 61 Python unittest checks pass: canonical ID/hash deduplication, edit history,
+- Native cscript discovery checks verify whole-folder relocation, depth six
+  success/depth seven rejection and explicit ambiguity handling. No live
+  recipient library was moved as a test.
+- Schedule management checks cover owner-scoped transactional bulk actions,
+  server/inherited propagation, independent overrides, deletion exclusions,
+  repeat removal and undo without overwriting newer edits or changing jobs.
+  Actual isolated UI exercised search, selection, pause/removal/undo, invalid
+  and double-save edits, persisted refresh, clear cancellation and clear/undo.
+  The in-page confirmation works in IAB; its browser console showed no errors.
+- Live History displays completed and partial saved counts and opens the
+  corresponding local transcript. All 45 existing schedules expose Edit and
+  pause/enable controls; no live schedules were changed for verification.
+- People tests cover account-scoped cache, renamed contacts, real friend-type
+  filtering, denied friends metadata, unavailable DMs, shared-chat/repeat dedup,
+  preserved schedule overrides and private forward-sweep options on re-enqueue.
+- Reordering tests preserve active positions, cursor/boundary/progress/options,
+  durable cooldown and restart order; stale/running drops are rejected. Preview
+  uses local keyset pages with no gaps when new messages arrive.
+- Actual synthetic UI checked 16 reachable queued tasks, scrolling to the end,
+  keyboard arrows, pointer drag with a saved order, server-name search/no results,
+  and People search/friends selection. A fixed queue overlay covering advanced
+  settings was reproduced and fixed with measured page spacing; the previously
+  blocked controls were then exercised live.
+- The populated recipient library was updated during its batch rest. Its 13
+  tasks and saved message checkpoints were retained; capture continued beyond
+  6,000 messages. Live contact metadata validated 140 contacts and 63 friends,
+  without initiating a bulk DM export as a test.
+- 81 Python unittest checks pass: canonical ID/hash deduplication, edit history,
   FTS search, import quality/rollback, aliases, scheduling, queue restart/catch-up,
   access gating, 403/404 no retry, 429 pacing, HTTP authorization, DPAPI/AES-GCM,
   independent channel export views, atomic ZIPs, and manual attachment bounds.

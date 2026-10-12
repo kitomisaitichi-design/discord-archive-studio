@@ -65,6 +65,7 @@ function showPage(page) {
   document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===page));
   if(page==='library') searchLibrary();
   if(page==='settings') loadUsers();
+  if(page==='people'&&typeof loadPeople==='function')loadPeople();
 }
 function currentChannels() { return state?.channels.filter(c=>c.server_id===selectedServer) || []; }
 function replaceSelect(element, choices, value, empty) {
@@ -79,6 +80,7 @@ function renderCatalog() {
   if(!state) return;
   replaceSelect($('server-select'),state.servers,selectedServer,'Choose a server');
   replaceSelect($('compact-server'),state.servers,selectedServer,'Choose a server');
+  if(typeof renderServerPickers==='function')renderServerPickers();
   replaceSelect($('compact-channel'),currentChannels().filter(c=>![4,15,16].includes(c.type)),Array.from(selected)[0]||'','Choose a channel');
   if(selectedServer && !state.servers.some(s=>s.id===selectedServer)) selectedServer='';
   const current=state.servers.find(s=>s.id===selectedServer);
@@ -148,18 +150,20 @@ function renderConnection() {
 }
 function jobHTML(job, history=false) {
   const allowedPause=['running','waiting','queued'].includes(job.status), allowedResume=['paused','failed','blocked'].includes(job.status);
-  const controls=history ? (job.status==='failed'?`<button data-job="${esc(job.id)}" data-action="apply" title="Apply the current export form settings">Use settings</button><button data-job="${esc(job.id)}" data-action="resume">Retry</button>`:'') :
+  const controls=history ? `<button data-saved-channel="${esc(job.channel_id)}" title="Read locally saved messages">Read messages</button>`+(job.status==='failed'?`<button data-job="${esc(job.id)}" data-action="apply" title="Apply the current export form settings">Use settings</button><button data-job="${esc(job.id)}" data-action="resume">Retry</button>`:'') :
     (allowedPause?`<button data-job="${esc(job.id)}" data-action="pause" title="Pause">Ⅱ</button>`:'')+
     (allowedResume?`<button data-job="${esc(job.id)}" data-action="resume" title="Recheck access and resume">▷</button>`:'')+
     (['queued','paused','blocked'].includes(job.status)?`<button data-job="${esc(job.id)}" data-action="apply" title="Apply the current export form settings">☷</button>`:'')+
-    (['queued','paused'].includes(job.status)?`<button data-job="${esc(job.id)}" data-action="up" title="Move earlier">↑</button><button data-job="${esc(job.id)}" data-action="down" title="Move later">↓</button>`:'')+
+    (['queued','paused','waiting','blocked'].includes(job.status)?`<button data-job="${esc(job.id)}" data-action="up" title="Move earlier">↑</button><button data-job="${esc(job.id)}" data-action="down" title="Move later">↓</button>`:'')+
     `<button data-job="${esc(job.id)}" data-action="cancel" title="Remove task; keep captured messages">×</button>`;
-  return `<div class="job-row ${esc(job.status)}"><div class="job-label"><strong>${esc(job.server_name)} <span class="muted"># ${esc(job.channel_name)}</span></strong><small>${job.options.formats.map(x=>x.toUpperCase()).join(' · ')} · ${number(job.options.batch_messages)} per batch</small></div><div class="job-progress"><div class="progress-track"><div class="progress-fill"></div></div><div class="job-state"><span class="job-detail" title="${esc(job.detail)}"><span class="status-label">${esc(job.status)}</span> · ${esc(job.detail||'Ready to begin')}</span><span>${number(job.progress)} scanned</span></div></div><div class="job-controls">${controls}</div></div>`;
+  const movable=!history&&['queued','paused','waiting','blocked'].includes(job.status);
+  return `<div class="job-row ${esc(job.status)}" ${history?'':`data-queue-job="${esc(job.id)}" data-movable="${movable}"`}><div class="job-label">${movable?'<span class="drag-handle" draggable="false" title="Drag to reorder; arrows also move this task" aria-label="Drag task">⠿</span>':''}<strong>${esc(job.server_name)} <span class="muted"># ${esc(job.channel_name)}</span></strong><small>${job.options.formats.map(x=>x.toUpperCase()).join(' · ')} · ${number(job.options.batch_messages)} per batch</small></div><div class="job-progress"><div class="progress-track"><div class="progress-fill"></div></div><div class="job-state"><span class="job-detail" title="${esc(job.detail)}"><span class="status-label">${esc(job.status)}</span> · ${esc(job.detail||'Ready to begin')}</span><span>${number(job.progress)} scanned</span></div></div><div class="job-controls">${controls}</div></div>`;
 }
 function renderQueue() {
   const signature=JSON.stringify([state.queue,state.history,state.schedules,state.publications]);
-  if(signature!==queueSignature){
-    $('tray-jobs').innerHTML=state.queue.slice(0,3).map(j=>jobHTML(j)).join('');
+  if(signature!==queueSignature&&!(typeof draggedJob!=='undefined'&&draggedJob)){
+    const scrolls=[$('tray-jobs'),$('queue-detail')].map(e=>e.scrollTop);
+    $('tray-jobs').innerHTML=state.queue.map(j=>jobHTML(j)).join('');
     $('queue-detail').innerHTML=state.queue.length?state.queue.map(j=>jobHTML(j)).join(''):'<div class="empty panel">Nothing waiting.<br>Select channels and add an export.</div>';
     $('history-list').innerHTML=state.history.length?state.history.map(j=>jobHTML(j,true)).join(''):'<div class="empty panel">Completed exports will appear here.</div>';
     $('schedule-list').innerHTML=state.schedules.length?state.schedules.map(s=>{
@@ -168,6 +172,7 @@ function renderQueue() {
     }).join(''):'<p class="hint">No schedules enabled. Configure one per server or per selected channel.</p>';
     $('publication-list').innerHTML=state.publications.length?state.publications.map(p=>`<div class="publication-item"><div><strong>${esc(state.servers.find(s=>s.id===p.server_id)?.name||p.server_id)}</strong><small>${esc(p.path)}</small></div><div>${(p.size/1048576).toFixed(1)} MB<small>${esc(new Date(p.updated*1000).toLocaleString())}</small></div></div>`).join(''):'<p class="hint">No current ZIPs have been published yet.</p>';
     queueSignature=signature;
+    [$('tray-jobs'),$('queue-detail')].forEach((e,i)=>e.scrollTop=scrolls[i]);
   }
   $('queue-badge').textContent=state.queue.length; $('tray-count').textContent=state.queue.length;
   const active=state.queue.find(j=>['running','waiting'].includes(j.status));
@@ -181,6 +186,62 @@ function renderCooldown(){
   const seconds=Math.max(0,Math.ceil(state.cooldown_until-Date.now()/1000));
   if(seconds&&state.queue.length){const text=`Batch rest · ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')} remaining`;$('tray-status').textContent=text;$('dock-status').textContent=text;cooldownTimer=setTimeout(renderCooldown,1000);}
 }
+let historySignature='', scheduleManagerSignature='', scheduleDraft=null, scheduleSelection=new Set();
+function scheduleName(s) {
+  const id=s.scope.split(':')[1], channel=state.channels.find(c=>c.id===id);
+  const server=state.servers.find(v=>v.id===(s.scope.startsWith('server:')?id:channel?.server_id));
+  return s.scope.startsWith('server:')?(server?.name||id)+ ' · server default':(server?.name?server.name+' · ':'')+'# '+(channel?.name||id);
+}
+function renderSavedHistory() {
+  if(!state)return;
+  const signature=JSON.stringify([state.stats.messages,state.channels,state.queue.map(j=>[j.channel_id,j.status])]);
+  if(signature===historySignature)return;historySignature=signature;
+  const channels=state.channels.filter(c=>c.count>0).sort((a,b)=>b.count-a.count);
+  $('history-summary').textContent=`${number(state.stats.messages)} messages saved locally across ${number(channels.length)} conversations. Partial batches are included; ${number(state.queue.length)} tasks remain in the queue.`;
+  const box=$('history-saved'),scroll=box.scrollTop;
+  box.innerHTML=channels.map(c=>{const job=state.queue.find(j=>j.channel_id===c.id),server=state.servers.find(s=>s.id===c.server_id);return `<div class="saved-row"><div><strong>${esc(server?.name||c.server_id)} · # ${esc(c.name)}</strong><small>${number(c.count)} saved messages · ${job?esc(job.status):c.history_done?'History captured':'Saved checkpoint'}</small></div><button data-saved-channel="${esc(c.id)}">Read messages →</button></div>`;}).join('')||'<div class="empty">Saved batches will appear here as messages arrive.</div>';
+  box.scrollTop=scroll;
+}
+function renderScheduleManager() {
+  if(!state)return;
+  const q=$('schedule-search').value.trim().toLowerCase(),owner=state.connection.account?.id;
+  const entries=state.schedules.filter(s=>(scheduleName(s)+' '+s.scope).toLowerCase().includes(q));
+  scheduleSelection=new Set([...scheduleSelection].filter(scope=>state.schedules.some(s=>s.scope===scope&&s.owner_id===owner)));
+  const signature=JSON.stringify([q,entries,state.servers,state.channels.map(c=>[c.id,c.name]),owner,[...scheduleSelection],state.schedule_recovery]);
+  if(signature===scheduleManagerSignature)return;scheduleManagerSignature=signature;
+  $('schedule-count').textContent=`${entries.length} of ${state.schedules.length} schedules · ${scheduleSelection.size} selected`;
+  document.querySelectorAll('[data-schedule-bulk]').forEach(b=>b.disabled=!scheduleSelection.size||pending.has('schedule-bulk'));
+  $('clear-all-schedules').disabled=!owner||!state.schedules.some(s=>s.owner_id===owner)||pending.has('schedule-bulk');
+  $('undo-schedule-removal').hidden=!state.schedule_recovery;
+  const box=$('schedule-manager'),scroll=box.scrollTop;
+  box.innerHTML=entries.map(s=>{const allowed=owner===s.owner_id;return `<div class="saved-row ${s.enabled?'':'schedule-paused'}"><input type="checkbox" data-select-schedule="${esc(s.scope)}" aria-label="Select ${esc(scheduleName(s))}" ${scheduleSelection.has(s.scope)?'checked':''} ${allowed?'':'disabled'}><div><strong>${esc(scheduleName(s))}</strong><small>${s.mode==='adaptive'?'Adaptive · current '+duration(s.minutes):'Every '+duration(s.minutes)}${s.options.inherited?' · inherited':' · independent'}<br>${s.enabled?'Next: '+esc(new Date(s.next_run*1000).toLocaleString()):'Paused'}${allowed?'':' · connect the original account to manage'}</small></div><div class="saved-actions"><button data-edit-schedule="${esc(s.scope)}" ${allowed?'':'disabled'}>Edit</button><button data-toggle-schedule="${esc(s.scope)}" ${allowed?'':'disabled'}>${s.enabled?'Pause':'Enable'}</button></div></div>`;}).join('')||'<div class="empty">'+(q?'No matching schedules.':'No schedules yet. Choose a server or channels in Export, then enable a schedule.')+'</div>';
+  box.scrollTop=scroll;
+}
+function readSavedChannel(id) {
+  const channel=state.channels.find(c=>c.id===id);showPage('library');
+  ['library-search','library-person','library-start','library-end'].forEach(key=>$(key).value='');
+  $('library-server').value=channel?.server_id||'';updateLibraryChannels();$('library-channel').value=id;offset=0;searchLibrary();
+}
+function editSchedule(scope) {
+  const s=state.schedules.find(v=>v.scope===scope);if(!s)return;
+  scheduleDraft=JSON.parse(JSON.stringify(s));
+  $('schedule-title').textContent=scheduleName(s);
+  $('schedule-context').textContent=scope.startsWith('channel:')?'Saving creates an independent channel override.':'Changes also apply to inherited channel schedules.';
+  $('schedule-edit-mode').value=s.mode;$('schedule-edit-minutes').value=s.minutes;$('schedule-edit-enabled').checked=!!s.enabled;
+  $('schedule-edit-minutes').disabled=s.mode==='adaptive';if(!$('schedule-dialog').open)$('schedule-dialog').showModal();
+}
+async function changeSavedSchedule(s,changes) {
+  if(state.connection.account?.id!==s.owner_id)throw new Error('Connect the original account before changing this schedule.');
+  const opts={...s.options};if(s.scope.startsWith('channel:'))opts.inherited=false;
+  await api('schedule',{scope:s.scope,enabled:!!s.enabled,mode:s.mode,minutes:s.minutes,options:opts,...changes});
+  applyState(await api('state'));
+}
+async function manageScheduleBatch(action) {
+  if(pending.has('schedule-bulk'))return;
+  pending.add('schedule-bulk');scheduleManagerSignature='';renderScheduleManager();
+  try{const result=await api('schedules/manage',{action,scopes:[...scheduleSelection]});if(['remove','clear','restore'].includes(action))scheduleSelection.clear();applyState(await api('state'));toast(`${number(result.changed)} schedules ${action==='restore'?'restored':action==='pause'?'paused':action==='enable'?'enabled':'removed'}. Saved messages and queue retained.`);}
+  catch(error){toast(error.message,true);}finally{pending.delete('schedule-bulk');scheduleManagerSignature='';renderScheduleManager();}
+}
 function safeLink(url) { try { const p=new URL(url,location.origin);return ['http:','https:'].includes(p.protocol)?p.href:''; } catch{return '';} }
 function contentHTML(text) {
   return esc(text).replace(/```([^]*?)```/g,'<pre><code>$1</code></pre>').replace(/`([^`\n]+)`/g,'<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>').replace(/~~([^~\n]+)~~/g,'<del>$1</del>');
@@ -191,11 +252,14 @@ function attachmentHTML(a, local, messageId) {
   const oversized=video&&Number(a.size)>10000000;
   return `<div class="attachment"><label>${!path&&a.id&&original?`<input type="checkbox" data-media-id="${esc(a.id)}" data-media-message="${esc(messageId)}" ${selectedMedia.has(String(a.id))?'checked':''} ${oversized?'disabled':''}> `:''}📎 ${esc(a.filename||a.fileName||'Attachment')} <small class="muted">${a.size?(Number(a.size)/1000000).toFixed(2)+' MB':'size unknown'}</small></label>${image?`<img src="${esc(path)}" alt="${esc(a.filename)}" loading="lazy">`:''}${path?` <a href="${esc(path)}" target="_blank" rel="noopener">Open saved file ↗</a>`:` <span class="muted">${esc(oversized?'Skipped: video exceeds 10 MB':a.download_status||'Manual download only')}</span>`}</div>`;
 }
+function previewMediaHTML(m){
+  return (m.attachments||[]).map(a=>`<div class="preview-attachment">📎 ${esc(a.filename||a.fileName||'Attachment')}${a.size?` <span class="muted">${(Number(a.size)/1000000).toFixed(2)} MB</span>`:''}</div>`).join('')+(m.embeds||[]).map(e=>`<div class="preview-attachment">${esc(String(e.title||e.description||'Embedded content').slice(0,500))}</div>`).join('');
+}
 function messageHTML(m, local, small=false) {
   messageMap.set(m.id,m);
   const author=m.author?.global_name||m.author?.nickname||m.author?.username||m.author?.name||'Unknown';
   const initial=Array.from(author).slice(0,2).join('').toUpperCase();
-  return `<article class="message" data-message-id="${esc(m.id)}"><div class="avatar">${esc(initial)}</div><div class="message-body"><div class="message-header"><span class="message-author">${esc(author)}</span><time class="message-time">${esc(new Date(m.timestamp).toLocaleString())}${m.edited_timestamp?' · edited':''}</time>${m.channel_name?`<span class="message-channel"># ${esc(m.channel_name)}</span>`:''}</div>${m.message_reference?.message_id?`<button class="message-reply subtle" data-reply="${esc(m.message_reference.message_id)}">↩ Reply to message ${esc(m.message_reference.message_id)}</button>`:''}<div class="message-content">${contentHTML(m.content||'')}</div>${small?'':(m.attachments||[]).map(a=>attachmentHTML(a,local,m.id)).join('')}${small?'':(m.embeds||[]).map(e=>`<div class="embed"><strong>${esc(e.title||'')}</strong><div>${esc(e.description||'')}</div></div>`).join('')}${m.reactions?.length?`<div class="reactions">${m.reactions.map(r=>`<span class="reaction">${esc(r.emoji?.name||'?')} ${number(r.count)}</span>`).join('')}</div>`:''}<div class="message-actions"><button data-copy-message="${esc(m.id)}">Copy text</button><button data-details="${esc(m.id)}">Details · ${esc(m.author?.id)}</button></div></div></article>`;
+  return `<article class="message" data-message-id="${esc(m.id)}"><div class="avatar">${esc(initial)}</div><div class="message-body"><div class="message-header"><span class="message-author">${esc(author)}</span><time class="message-time">${esc(new Date(m.timestamp).toLocaleString())}${m.edited_timestamp?' · edited':''}</time>${m.channel_name?`<span class="message-channel"># ${esc(m.channel_name)}</span>`:''}</div>${m.message_reference?.message_id?`<button class="message-reply subtle" data-reply="${esc(m.message_reference.message_id)}">↩ Reply to message ${esc(m.message_reference.message_id)}</button>`:''}<div class="message-content">${contentHTML(m.content||'')}</div>${small?previewMediaHTML(m):(m.attachments||[]).map(a=>attachmentHTML(a,local,m.id)).join('')}${small?'':(m.embeds||[]).map(e=>`<div class="embed"><strong>${esc(e.title||'')}</strong><div>${esc(e.description||'')}</div></div>`).join('')}${m.reactions?.length?`<div class="reactions">${m.reactions.map(r=>`<span class="reaction">${esc(r.emoji?.name||'?')} ${number(r.count)}</span>`).join('')}</div>`:''}<div class="message-actions"><button data-copy-message="${esc(m.id)}">Copy text</button><button data-details="${esc(m.id)}">Details · ${esc(m.author?.id)}</button></div></div></article>`;
 }
 async function searchLibrary() {
   if(!state)return;
@@ -205,6 +269,7 @@ async function searchLibrary() {
   catch(error){if(error.name!=='AbortError')toast(error.message,true);}
 }
 function renderResults() {
+  $('library-results').classList.toggle('transcript',libraryTab==='messages');
   $('result-count').textContent=`${number(results.total)} matching messages`;
   $('page-label').textContent=results.total?`Page ${Math.floor(offset/80)+1} · ${number(offset+1)}–${number(Math.min(offset+80,results.total))}`:'No results';
   $('previous-page').disabled=offset===0;$('next-page').disabled=offset+80>=results.total;
@@ -212,10 +277,22 @@ function renderResults() {
   if(libraryTab==='attachments') $('library-results').innerHTML=results.messages.flatMap(m=>(m.attachments||[]).map(a=>`<div class="panel"><div class="panel-title">${esc(m.channel_name)} · ${esc(m.author?.username||m.author?.name||'Unknown')}</div>${attachmentHTML(a,results.media,m.id)}</div>`)).join('')||'<div class="empty panel">No attachments on this result page.</div>';
   if(libraryTab==='statistics') $('library-results').innerHTML=`<div class="stats-grid">${[['Matching messages',results.total],['All saved messages',state.stats.messages],['People in library',state.stats.people],['Archived channels',state.stats.channels],['Downloaded attachments',state.stats.attachments],['Captured prior versions',state.stats.revisions]].map(([k,v])=>`<div class="stat-card"><span>${k}</span><strong>${number(v)}</strong></div>`).join('')}</div><p class="hint">Library totals cover all saved data. The matching-message count follows your search and filters.</p>`;
 }
-async function preview() {
+let previewChannel='',previewMessages=new Map(),previewCursor=null,previewMore=false,previewVersion=0;
+async function preview(older=false) {
   const channel=Array.from(selected)[0];
-  if(!channel){$('mini-preview').innerHTML='<div class="empty small">Select a channel to preview saved messages.</div>';return;}
-  try{const value=await api('search?'+new URLSearchParams({channel,limit:3}));$('mini-preview').innerHTML=value.messages.map(m=>messageHTML(m,value.media,true)).join('')||'<div class="empty small">Preview appears after the first saved batch.</div>';}catch(error){$('mini-preview').innerHTML=`<div class="empty small">${esc(error.message)}</div>`;}
+  if(!channel){previewVersion++;previewChannel='';previewMessages.clear();previewCursor=null;$('mini-preview').innerHTML='<div class="empty small">Select a channel to preview saved messages.</div>';return;}
+  const container=$('mini-preview'),changed=channel!==previewChannel,version=++previewVersion;
+  if(changed){previewChannel=channel;previewMessages.clear();previewCursor=null;older=false;}
+  const oldHeight=container.scrollHeight,oldTop=container.scrollTop,atEnd=oldHeight-oldTop-container.clientHeight<35;
+  try{
+    const value=await api('preview?'+new URLSearchParams({channel,limit:50,...(older&&previewCursor?{before:previewCursor}:{})}));if(version!==previewVersion)return;
+    for(const m of value.messages)previewMessages.set(m.id,m);
+    if(older||changed||!previewCursor){previewCursor=value.next_cursor;previewMore=value.has_more;}
+    const messages=[...previewMessages.values()].sort((a,b)=>Date.parse(a.timestamp)-Date.parse(b.timestamp)||a.id.length-b.id.length||a.id.localeCompare(b.id));
+    container.innerHTML=(previewMore?'<button id="preview-older" class="subtle">↑ Load older saved messages</button>':'')+messages.map(m=>messageHTML(m,{},true)).join('')||'<div class="empty small">Preview appears after the first saved batch.</div>';
+    if($('preview-older'))$('preview-older').onclick=()=>busy($('preview-older'),()=>preview(true));
+    container.scrollTop=older?oldTop+container.scrollHeight-oldHeight:(changed||atEnd?container.scrollHeight:oldTop);
+  }catch(error){if(version===previewVersion)toast('Saved preview: '+error.message,true);}
 }
 async function loadUsers() {
   try {const users=await api('users');replaceSelect($('alias-user'),users.map(u=>({id:u.id,name:`${u.name} · ${u.id}`})),$('alias-user').value,'Choose an archived person…');replaceSelect($('alias-target'),users.map(u=>({id:u.id,name:`${u.name} · ${u.id}`})),$('alias-target').value,'Choose an archived person…');$('alias-list').textContent=users.filter(u=>u.person_id).map(u=>`${u.name} (${u.id}) → ${u.person_id}`).join('\n')||'No cross-account links.';}catch(e){toast(e.message,true);}
@@ -225,13 +302,14 @@ function applyState(value) {
   if(was&&currentPage==='library'&&JSON.stringify(was.channels.map(c=>[c.id,c.generation]))!==JSON.stringify(value.channels.map(c=>[c.id,c.generation])))$('library-updates').hidden=false;
   if(!was){$('destination').value=value.destination;setIntervalMinutes(1440);}
   if(!was&&currentPage==='library')searchLibrary();
-  renderConnection();renderCatalog();renderQueue();
+  renderConnection();renderCatalog();renderQueue();renderSavedHistory();renderScheduleManager();
   $('auto-connect').checked=state.auto_connect;
   $('app-address').textContent=location.origin;$('app-address').href=location.origin+'/';
   $('media-task-list').innerHTML=(state.media_tasks||[]).map(t=>`<div class="schedule-item"><div><strong># ${esc(t.channel_name)} · ${esc(t.attachment_id)}</strong><small>${esc(t.status)} · ${(t.received/1000000).toFixed(2)} MB · ${esc(t.detail)}</small></div>${['queued','running','paused'].includes(t.status)?`<button data-cancel-media="${esc(t.attachment_id)}">Cancel</button>`:''}</div>`).join('')||'<p class="hint">No attachments selected. Text exports never start media downloads.</p>';
   replaceSelect($('preset-select'),state.presets.map(p=>({id:p.name,name:p.name})),$('preset-select').value,'Load a preset…');
   if(value.stats.messages!==knownMessageCount){if(currentPage==='library'&&was)$('library-updates').hidden=false;knownMessageCount=value.stats.messages;preview();}
   if(value.worker_error&&value.worker_error!==was?.worker_error)toast(value.worker_error,true);
+  if(typeof updatePeopleAccount==='function')updatePeopleAccount();
 }
 function connectEvents() {
   stream?.close();stream=new EventSource('/api/events');
@@ -257,6 +335,9 @@ document.addEventListener('click',event=>{
   const button=event.target.closest('button');if(!button)return;
   if(button.dataset.page)showPage(button.dataset.page);
   if(button.dataset.mode)viewMode(button.dataset.mode);
+  if(button.dataset.savedChannel)readSavedChannel(button.dataset.savedChannel);
+  if(button.dataset.editSchedule)editSchedule(button.dataset.editSchedule);
+  if(button.dataset.toggleSchedule)busy(button,async()=>{const s=state.schedules.find(v=>v.scope===button.dataset.toggleSchedule);if(s){await changeSavedSchedule(s,{enabled:!s.enabled});toast(s.enabled?'Schedule paused.':'Schedule enabled.');}});
   if(button.dataset.removeChannel){selected.delete(button.dataset.removeChannel);renderCatalog();preview();}
   if(button.dataset.job)busy(button,()=>api('control',{id:button.dataset.job,action:button.dataset.action,...(button.dataset.action==='apply'?{options:readOptions()}:{})}));
   if(button.dataset.cancelMedia)busy(button,()=>api('media/cancel',{id:button.dataset.cancelMedia}));
@@ -266,6 +347,7 @@ document.addEventListener('click',event=>{
 });
 document.addEventListener('change',event=>{
   const input=event.target;
+  if(input.dataset.selectSchedule){input.checked?scheduleSelection.add(input.dataset.selectSchedule):scheduleSelection.delete(input.dataset.selectSchedule);renderScheduleManager();}
   if(input.dataset.mediaId){input.checked?selectedMedia.set(input.dataset.mediaId,{attachment_id:input.dataset.mediaId,message_id:input.dataset.mediaMessage}):selectedMedia.delete(input.dataset.mediaId);$('selected-media-count').textContent=selectedMedia.size;}
 });
 $('download-selected').onclick=()=>busy($('download-selected'),async()=>{const result=await api('media/select',{selections:Array.from(selectedMedia.values()),cap_mb:Number($('media-cap').value)});selectedMedia.clear();$('selected-media-count').textContent='0';await searchLibrary();toast(`${result.tasks} manual downloads queued; ${result.skipped} skipped by size cap. Text exports run first.`);});
@@ -314,4 +396,15 @@ $('close-message').onclick=()=>$('message-dialog').close();
 $('shutdown').onclick=()=>busy($('shutdown'),async()=>{closing=true;stream?.close();await api('shutdown',{});toast('Archive service closed. Reopen the launcher to continue.');});
 $('retry-app').onclick=()=>{connectEvents();api('state').then(applyState).catch(e=>toast(e.message,true));};
 document.addEventListener('keydown',e=>{if(e.key==='/'&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)){e.preventDefault();showPage('library');$('library-search').focus();}});
+$('schedule-search').oninput=renderScheduleManager;
+$('select-filtered-schedules').onclick=()=>{const q=$('schedule-search').value.trim().toLowerCase();state.schedules.filter(s=>s.owner_id===state.connection.account?.id&&(scheduleName(s)+' '+s.scope).toLowerCase().includes(q)).forEach(s=>scheduleSelection.add(s.scope));renderScheduleManager();};
+$('clear-schedule-selection').onclick=()=>{scheduleSelection.clear();renderScheduleManager();};
+document.querySelectorAll('[data-schedule-bulk]').forEach(b=>b.onclick=()=>manageScheduleBatch(b.dataset.scheduleBulk));
+$('clear-all-schedules').onclick=()=>{if(!$('clear-schedules-dialog').open)$('clear-schedules-dialog').showModal();};
+$('cancel-clear-schedules').onclick=()=>$('clear-schedules-dialog').close();
+$('confirm-clear-schedules').onclick=()=>{$('clear-schedules-dialog').close();manageScheduleBatch('clear');};
+$('undo-schedule-removal').onclick=()=>manageScheduleBatch('restore');
+$('close-schedule').onclick=()=>$('schedule-dialog').close();
+$('schedule-edit-mode').onchange=()=>$('schedule-edit-minutes').disabled=$('schedule-edit-mode').value==='adaptive';
+$('schedule-form').onsubmit=event=>{event.preventDefault();busy($('save-schedule-edit'),async()=>{if(!scheduleDraft)return;const minutes=Number($('schedule-edit-minutes').value);if(!Number.isFinite(minutes)||minutes<10||minutes>10080)throw new Error('Choose an interval from 10 to 10,080 minutes.');await changeSavedSchedule(scheduleDraft,{enabled:$('schedule-edit-enabled').checked,mode:$('schedule-edit-mode').value,minutes});$('schedule-dialog').close();toast('Schedule saved; export settings and checkpoints preserved.');});};
 viewMode(mode);showPage(currentPage);intervalLabel();api('state').then(applyState).then(connectEvents).catch(e=>{toast(e.message,true);$('offline-banner').hidden=false;});

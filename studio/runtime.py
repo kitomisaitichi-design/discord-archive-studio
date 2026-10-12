@@ -180,6 +180,7 @@ class Worker:
             return
         owner = self.connection.account['id']
         schedules = self.store.schedules()
+        exclusions=set(self.store.setting('schedule_exclusions:'+owner,[]))
         overrides = {s['scope']: s for s in schedules if s['scope'].startswith('channel:') and s['owner_id'] == owner}
         now = time.time()
         # Server defaults produce durable per-channel clocks, preserving independent adaptive timing.
@@ -208,7 +209,7 @@ class Worker:
                 if channel['type'] in (4, 15, 16):
                     continue
                 scope = 'channel:'+channel['id']
-                if scope not in overrides:
+                if not any(s['scope']==scope for s in schedules) and scope not in exclusions:
                     self.store.schedule(scope, owner, True, schedule['mode'], schedule['minutes'], dict(schedule['options'], inherited=True))
         for schedule in self.store.schedules():
             if schedule['owner_id'] != owner or not schedule['enabled'] or not schedule['scope'].startswith('channel:') or schedule['next_run'] > now:

@@ -5,6 +5,14 @@ from .exporting import DEFAULT_OPTIONS
 def seed(store):
     store.set_setting('demo', True)
     store.set_setting('auto_connect', False)
+    # Synthetic contacts stay offline; they exercise filtering without using a real session.
+    owner='840000000000000009'
+    contacts=[]
+    for n,name in enumerate(('Stella','Orion','Luna','Mira'),1):
+        contacts.append({'id':'84000000000000000'+str(n),'name':name,'username':name.lower(),'channel_ids':['83500000000000000'+str(n)],'group_ids':[],'friend':n%2==1})
+    store.set_setting('account_id',owner)
+    store.catalog([{'id':'0','name':'Direct messages'}],[{'id':p['channel_ids'][0],'name':p['name'],'type':1} for p in contacts],'0')
+    store.set_setting('people:'+owner,{'contacts':contacts,'updated':datetime.now(timezone.utc).timestamp(),'friends_updated':datetime.now(timezone.utc).timestamp(),'friends_available':True,'friends_note':''})
     if store.stats()['messages']:
         return
     guild={'id':'820000000000000001','name':'Midnight Lounge'}

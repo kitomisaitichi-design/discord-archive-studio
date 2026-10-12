@@ -16,6 +16,10 @@ Download the **Portable ZIP** from [Releases](https://github.com/kitomisaitichi-
 - SQLite full-text search, paged offline message browsing, prior captured edits and explicit reversible identity links.
 - Manual attachment downloads run after text jobs, with bounded file and queue sizes. Videos above 10 MB are excluded.
 - Midnight, Light, High Contrast and System themes, plus Full, Compact and Dock layouts.
+- Scrollable queues with drag grips and keyboard arrows, searchable server names, and a continuous reading pane.
+- A People directory for selecting DM contacts or friends, bulk queueing available chats, and adding independent adaptive schedules.
+- History shows saved conversation counts, including partial batches, with direct reading links. Schedules supports search, selection, bulk pause/enable/removal, clear all and undo.
+- The native VBS launcher supports folder moves and bounded fallback discovery through six subfolder levels, with an explicit choice among multiple copies.
 - One current ZIP per server, verified before atomic replacement. Unchanged content retains the existing file and timestamp.
 
 Desktop reconnect uses the existing local session. Browser reconnect requires one-time installation and pairing of the included connector; its port must match the address shown in app Settings.

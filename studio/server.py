@@ -18,6 +18,7 @@ from .exporting import options, DEFAULT_OPTIONS, media_limit, media_reason
 from .importing import import_data
 from .store import packed, valid_id
 from .launching import library_identity
+from .people import People
 
 
 class Server(ThreadingHTTPServer):
@@ -39,6 +40,7 @@ class Server(ThreadingHTTPServer):
         self.mutation_lock = threading.RLock()
         self.window_state = {}
         self.native_window_enabled = False
+        self.people = People(store)
 
     def state(self):
         destination = self.worker.destination()
@@ -56,6 +58,7 @@ class Server(ThreadingHTTPServer):
         return {'version': self.store.version, 'connection': self.connection.status(), 'servers': self.store.servers(),
                 'channels': channels, 'queue': self.store.jobs(), 'history': self.store.jobs(True),
                 'stats': self.store.stats(), 'schedules': self.store.schedules(), 'publications': pubs,
+                'schedule_recovery': bool(self.store.setting('removed_schedules:'+self.connection.account['id'],[])) if self.connection.account else False,
                 'destination': destination, 'cooldown_until': self.store.setting('cooldown_until', 0),
                 'defaults': DEFAULT_OPTIONS, 'presets': presets, 'demo': self.store.setting('demo', False),
                 'media_tasks': self.store.media_tasks(), 'auto_connect':self.store.setting('auto_connect',True),
@@ -117,7 +120,7 @@ class Handler(BaseHTTPRequestHandler):
             route = urlparse(self.path)
             query = {k: v[-1] for k, v in parse_qs(route.query).items()}
             if route.path == '/api/health':
-                self.json({'app': 'Discord Archive Studio', 'version': '1.0.1','library_id':library_identity(self.server.store.root)})
+                self.json({'app': 'Discord Archive Studio', 'version': '1.1.0','library_id':library_identity(self.server.store.root)})
                 return
             if route.path in ('/', '/index.html'):
                 payload = (self.server.web / 'index.html').read_bytes()
@@ -145,6 +148,11 @@ class Handler(BaseHTTPRequestHandler):
                                     local[aid]='/media/'+row['hash']
                 result['media'] = local
                 self.json(result)
+            elif route.path == '/api/preview':
+                self.json(self.server.store.preview(query.get('channel',''),query.get('before'),query.get('limit',50)))
+            elif route.path == '/api/people':
+                owner=(self.server.connection.account or {}).get('id') or self.server.store.setting('account_id')
+                self.json(self.server.people.cached(owner))
             elif route.path == '/api/users':
                 self.json(self.server.store.users())
             elif route.path == '/api/message':
@@ -172,7 +180,7 @@ class Handler(BaseHTTPRequestHandler):
                 with path.open('rb') as source:
                     while block := source.read(256*1024):
                         self.wfile.write(block)
-            elif route.path in ('/app.js', '/style.css'):
+            elif route.path in ('/app.js', '/style.css', '/server-picker.js', '/queue.js', '/people.js'):
                 path = self.server.web / route.path.lstrip('/')
                 payload = path.read_bytes()
                 self.send_headers(kind='text/javascript; charset=utf-8' if path.suffix=='.js' else 'text/css; charset=utf-8', length=len(payload))
@@ -301,6 +309,16 @@ class Handler(BaseHTTPRequestHandler):
             guilds = connection.api().guilds()
             store.catalog(guilds)
             return {'servers': len(guilds)}
+        elif path == '/api/people/refresh':
+            return self.server.people.refresh(connection.api(),connection.account['id'],bool(data.get('friends')),bool(data.get('force')))
+        elif path == '/api/people/enqueue':
+            if not connection.account or not connection.token:raise ValueError('Connect to Discord before queueing DM chats.')
+            result=self.server.people.queue(connection.api(),connection.account['id'],data.get('users'),options(data.get('options')),bool(data.get('groups')),bool(data.get('friends')),bool(data.get('adaptive')))
+            worker.signal()
+            return result
+        elif path == '/api/reorder':
+            store.reorder(str(data.get('id')),data.get('before'))
+            worker.signal()
         elif path == '/api/enqueue':
             if not connection.account or not connection.token:
                 raise ValueError('Connect to Discord before creating a live export task.')
@@ -326,10 +344,19 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('This task belongs to another Discord account. Switch back to its original account first.')
                 store.control(str(data['id']), str(data['action']))
             worker.signal()
+        elif path == '/api/schedules/manage':
+            if not connection.account:
+                raise ValueError('Connect the original account before managing schedules.')
+            result=store.manage_schedules(connection.account['id'],str(data.get('action')),data.get('scopes'))
+            worker.signal()
+            return result
         elif path == '/api/schedule':
             if not connection.account:
                 raise ValueError('Connect before configuring a live schedule.')
             scope = str(data['scope'])
+            existing=next((s for s in store.schedules() if s['scope']==scope),None)
+            if existing and existing['owner_id']!=connection.account['id']:
+                raise ValueError('This schedule belongs to another Discord account.')
             opts = options(data.get('options'))
             enabled = bool(data.get('enabled'))
             store.schedule(scope, connection.account['id'], enabled, data.get('mode', 'fixed'), data.get('minutes', 1440), opts)
@@ -337,7 +364,7 @@ class Handler(BaseHTTPRequestHandler):
                 # Update inherited children while retaining every explicit per-channel override.
                 sid = scope.split(':', 1)[1]
                 for entry in store.schedules():
-                    if entry['scope'].startswith('channel:') and entry['options'].get('inherited') and any(c['id']==entry['scope'].split(':',1)[1] for c in store.channels(sid)):
+                    if entry['owner_id']==connection.account['id'] and entry['scope'].startswith('channel:') and entry['options'].get('inherited') and any(c['id']==entry['scope'].split(':',1)[1] for c in store.channels(sid)):
                         store.schedule(entry['scope'], connection.account['id'], enabled, data.get('mode', 'fixed'), data.get('minutes', 1440), dict(opts, inherited=True))
             worker.signal()
         elif path == '/api/recommend':

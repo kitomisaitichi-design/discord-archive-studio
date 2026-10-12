@@ -276,6 +276,20 @@ class Store:
                               params + [max(1, min(int(limit), 200)), max(0, int(offset))]).fetchall()
         return {'total': count, 'messages': [dict(json.loads(r['raw']), channel_name=r['channel_name'], server_id=r['server_id']) for r in rows]}
 
+    def preview(self, channel_id, before=None, limit=50):
+        cid=valid_id(channel_id);limit=max(1,min(int(limit),100))
+        params=[cid];where='m.channel_id=?'
+        with self.db() as db:
+            if before:
+                before=valid_id(before)
+                boundary=db.execute('SELECT timestamp FROM messages WHERE id=? AND channel_id=?',(before,cid)).fetchone()
+                if not boundary:raise ValueError('The preview cursor is not in this saved channel.')
+                where+=' AND (m.timestamp<? OR (m.timestamp=? AND (length(m.id)<length(?) OR (length(m.id)=length(?) AND m.id<?))))'
+                params.extend([boundary['timestamp'],boundary['timestamp'],before,before,before])
+            rows=db.execute('SELECT m.raw,c.name channel_name,c.server_id FROM messages m JOIN channels c ON c.id=m.channel_id WHERE '+where+' ORDER BY m.timestamp DESC,length(m.id) DESC,m.id DESC LIMIT ?',params+[limit+1]).fetchall()
+        messages=[dict(json.loads(r['raw']),channel_name=r['channel_name'],server_id=r['server_id']) for r in rows[:limit]]
+        return {'messages':messages,'has_more':len(rows)>limit,'next_cursor':messages[-1]['id'] if messages else None,'media':{}}
+
     def iter_messages(self, channel_id):
         with self.db() as db:
             for row in db.execute('SELECT raw FROM messages WHERE channel_id=? ORDER BY timestamp,length(id),id', (channel_id,)):
@@ -319,12 +333,13 @@ class Store:
                 row = db.execute('SELECT type FROM channels WHERE id=?', (cid,)).fetchone()
                 if not row or row['type'] in (4, 15, 16):
                     continue
-                existing = db.execute("SELECT id,status FROM jobs WHERE channel_id=? AND owner_id=? AND status IN ('queued','running','waiting','paused','blocked') ORDER BY position LIMIT 1", (cid, owner)).fetchone()
+                existing = db.execute("SELECT id,status,options FROM jobs WHERE channel_id=? AND owner_id=? AND status IN ('queued','running','waiting','paused','blocked') ORDER BY position LIMIT 1", (cid, owner)).fetchone()
                 if existing:
                     if existing['status'] in ('running', 'waiting') and scheduled:
                         db.execute('UPDATE jobs SET dirty=1 WHERE id=?', (existing['id'],))
                     elif existing['status'] == 'queued' and not scheduled:
-                        db.execute('UPDATE jobs SET options=? WHERE id=?', (packed(options), existing['id']))
+                        internal={k:v for k,v in json.loads(existing['options']).items() if k.startswith('_')}
+                        db.execute('UPDATE jobs SET options=? WHERE id=?', (packed(dict(options,**internal)), existing['id']))
                     ids.append(existing['id'])
                     continue
                 jid = uuid.uuid4().hex
@@ -357,6 +372,23 @@ class Store:
         with self.db() as db:
             db.execute('UPDATE jobs SET ' + ','.join(k+'=?' for k in fields) + ' WHERE id=?', list(fields.values())+[jid])
 
+    def reorder(self, jid, before=None, direction=None):
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            rows=db.execute("SELECT id,position,status FROM jobs WHERE status NOT IN ('completed','cancelled','failed') ORDER BY position").fetchall()
+            movable=[r for r in rows if r['status']!='running']
+            ids=[r['id'] for r in movable]
+            if jid not in ids:raise ValueError('This task is exporting or no longer movable. Refresh the queue.')
+            if direction:
+                index=ids.index(jid);target=index+(-1 if direction=='up' else 1)
+                if target<0 or target>=len(ids):return
+                ids[index],ids[target]=ids[target],ids[index]
+            elif before!=jid:
+                if before is not None and before not in ids:raise ValueError('The drop target is exporting or no longer in the queue.')
+                ids.remove(jid);ids.insert(ids.index(before) if before else len(ids),jid)
+            # Active positions remain fixed. Only vacant movable slots change ownership.
+            for row,uid in zip(movable,ids):db.execute('UPDATE jobs SET position=? WHERE id=?',(row['position'],uid))
+
     def control(self, jid, action):
         job = self.job(jid)
         if action == 'pause' and job['status'] in ('running', 'waiting', 'queued'):
@@ -365,12 +397,8 @@ class Store:
             self.update_job(jid, status='queued', detail='Ready to resume.')
         elif action == 'cancel' and job['status'] not in ('completed', 'cancelled'):
             self.update_job(jid, status='cancelled', detail='Cancelled; captured messages are preserved.')
-        elif action in ('up', 'down') and job['status'] in ('queued', 'paused'):
-            with self.db() as db:
-                other = db.execute("SELECT id,position FROM jobs WHERE status IN ('queued','paused') AND position " + ('<' if action=='up' else '>') + " ? ORDER BY position " + ('DESC' if action=='up' else 'ASC') + ' LIMIT 1', (job['position'],)).fetchone()
-                if other:
-                    db.execute('UPDATE jobs SET position=? WHERE id=?', (other['position'], jid))
-                    db.execute('UPDATE jobs SET position=? WHERE id=?', (job['position'], other['id']))
+        elif action in ('up', 'down'):
+            self.reorder(jid,direction=action)
         else:
             raise ValueError('This action is not available for this task state.')
 
@@ -396,8 +424,62 @@ class Store:
         if mode == 'adaptive' and scope.startswith('channel:'):
             minutes = self.interval(scope.split(':',1)[1])['minutes']
         with self.db() as db:
+            key='schedule_exclusions:'+owner
+            row=db.execute('SELECT value FROM settings WHERE key=?',(key,)).fetchone()
+            excluded=json.loads(row['value']) if row else []
+            if scope in excluded:
+                db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)',(key,packed([s for s in excluded if s!=scope])))
             db.execute('INSERT OR REPLACE INTO schedules VALUES(?,?,?,?,?,?,?)',
                        (scope, owner, int(bool(enabled)), mode, minutes, packed(options), time.time()+minutes*60))
+
+    def manage_schedules(self, owner, action, scopes=None):
+        if action not in ('pause','enable','remove','clear','restore'):
+            raise ValueError('Unknown schedule action.')
+        if not isinstance(scopes or [],list) or len(scopes or [])>20000 or any(not isinstance(s,str) for s in scopes or []):
+            raise ValueError('Choose a bounded list of schedules.')
+        key='schedule_exclusions:'+owner
+        recovery='removed_schedules:'+owner
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            rows={r['scope']:dict(r) for r in db.execute('SELECT * FROM schedules')}
+            record=db.execute('SELECT value FROM settings WHERE key=?',(key,)).fetchone()
+            excluded=set(json.loads(record['value']) if record else [])
+            if action=='restore':
+                record=db.execute('SELECT value FROM settings WHERE key=?',(recovery,)).fetchone()
+                restored=0
+                for row in json.loads(record['value']) if record else []:
+                    if row['owner_id']!=owner or row['scope'] in rows:continue
+                    db.execute('INSERT INTO schedules VALUES(?,?,?,?,?,?,?)',tuple(row[k] for k in ('scope','owner_id','enabled','mode','minutes','options','next_run')))
+                    excluded.discard(row['scope']);restored+=1
+                db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)',(recovery,packed([])))
+                db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)',(key,packed(sorted(excluded))))
+                return {'changed':restored}
+            wanted={r['scope'] for r in rows.values() if r['owner_id']==owner} if action=='clear' else set(scopes or [])
+            for scope in wanted:
+                if not isinstance(scope,str) or not scope.startswith(('server:','channel:')):raise ValueError('Invalid schedule selection.')
+                valid_id(scope.split(':',1)[1])
+                if scope in rows and rows[scope]['owner_id']!=owner:raise ValueError('A selected schedule belongs to another account.')
+            chosen={s for s in wanted if s in rows}
+            parents={s.split(':',1)[1] for s in chosen if s.startswith('server:')}
+            channels={r['id']:r['server_id'] for r in db.execute('SELECT id,server_id FROM channels')}
+            for scope,row in rows.items():
+                if row['owner_id']==owner and scope.startswith('channel:') and channels.get(scope.split(':',1)[1]) in parents and json.loads(row['options']).get('inherited'):
+                    chosen.add(scope)
+            if action in ('remove','clear'):
+                if chosen:
+                    db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)',(recovery,packed([rows[s] for s in sorted(chosen)])))
+                for scope in chosen:
+                    db.execute('DELETE FROM schedules WHERE scope=?',(scope,))
+                    if scope.startswith('channel:'):excluded.add(scope)
+                db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)',(key,packed(sorted(excluded))))
+            else:
+                now=time.time()
+                for scope in chosen:
+                    row=rows[scope];opts=json.loads(row['options'])
+                    if scope in wanted and scope.startswith('channel:'):opts['inherited']=False
+                    next_run=now+row['minutes']*60 if action=='enable' and not row['enabled'] else row['next_run']
+                    db.execute('UPDATE schedules SET enabled=?,options=?,next_run=? WHERE scope=?',(int(action=='enable'),packed(opts),next_run,scope))
+            return {'changed':len(chosen)}
 
     def schedules(self):
         with self.db() as db:

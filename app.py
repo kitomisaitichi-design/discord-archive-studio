@@ -34,6 +34,7 @@ def main():
     parser.add_argument('--port', type=int, default=None, help='Optional fixed port; automatic free-port selection is the default.')
     parser.add_argument('--data', type=Path, default=Path(__file__).resolve().parent / 'Data')
     parser.add_argument('--no-browser', action='store_true')
+    parser.add_argument('--reuse-window', action='store_true', help='Keep native controls for an existing app window without opening another.')
     parser.add_argument('--no-connect', action='store_true')
     parser.add_argument('--demo', action='store_true')
     args = parser.parse_args()
@@ -58,7 +59,7 @@ def run_service(args):
     server = bind_server(lambda address:Server(address,store,connection,worker),args.port,preferred_port(args.data))
     port=server.server_port
     save_address(args.data,port)
-    server.native_window_enabled = not args.no_browser
+    server.native_window_enabled = not args.no_browser or args.reuse_window
     if not args.no_connect:
         threading.Thread(target=connection.monitor, daemon=True).start()
     worker_thread = threading.Thread(target=worker.run, daemon=True)

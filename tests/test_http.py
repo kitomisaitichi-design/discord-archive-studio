@@ -33,10 +33,26 @@ class LocalHTTPTests(unittest.TestCase):
         with self.browser.open(self.url+'/') as response:
             self.assertIn('SameSite=Strict',response.headers['Set-Cookie'])
             self.assertIn(b'Keep the conversation.',response.read())
-        for resource in ('app.js','style.css'):
+        for resource in ('app.js','style.css','server-picker.js','queue.js','people.js'):
             with self.browser.open(self.url+'/'+resource) as response:self.assertGreater(len(response.read()),100)
         with self.browser.open(self.url+'/api/state') as response:
             self.assertNotIn('token',json.load(response)['connection'])
+        with self.browser.open(self.url+'/api/people') as response:self.assertEqual(json.load(response)['contacts'],[])
+        with self.browser.open(self.url+'/api/preview?channel=1') as response:self.assertEqual(json.load(response)['messages'],[])
+
+    def test_bulk_schedule_endpoint_remove_repeat_restore_and_owner_guard(self):
+        self.browser.open(self.url+'/').close()
+        store=self.server.store;self.server.connection.account={'id':'7','name':'Fixture'}
+        store.catalog([{'id':'10','name':'Fixture'}],[{'id':'11','name':'One','type':0}],'10')
+        from studio.exporting import DEFAULT_OPTIONS
+        store.schedule('channel:11','7',True,'fixed',1440,DEFAULT_OPTIONS)
+        for expected in (1,0):
+            with self.post('schedules/manage',{'action':'remove','scopes':['channel:11']}) as response:self.assertEqual(json.load(response)['changed'],expected)
+        with self.browser.open(self.url+'/api/state') as response:self.assertTrue(json.load(response)['schedule_recovery'])
+        with self.post('schedules/manage',{'action':'restore'}) as response:self.assertEqual(json.load(response)['changed'],1)
+        self.server.connection.account={'id':'8','name':'Other'}
+        with self.assertRaises(HTTPError):self.post('schedule',{'scope':'channel:11','enabled':False})
+        self.assertEqual(store.schedules()[0]['owner_id'],'7')
 
     def test_sensitive_api_requires_cookie_and_post_requires_origin(self):
         with self.assertRaises(HTTPError) as failure:self.browser.open(self.url+'/api/state')
