@@ -1,0 +1,25 @@
+Discord Archive Studio — bundled runtime notices
+
+The portable release includes unmodified CPython 3.12.14 binaries and a subset
+of its standard library. Its license and notices are in runtime/LICENSE.txt.
+Python Software Foundation: https://www.python.org/psf/license/
+
+Runtime libraries include:
+- OpenSSL (runtime reports 3.5.8): Apache License 2.0.
+  Full terms: licenses/OpenSSL-Apache-2.0.txt; https://www.openssl.org/
+- libffi: MIT license; licenses/libffi-MIT.txt; https://sourceware.org/libffi/
+- zlib: zlib license; licenses/zlib.txt; https://zlib.net/
+- bzip2: bzip2 license; licenses/bzip2.txt; https://sourceware.org/bzip2/
+- XZ Utils / liblzma: licenses/xz.txt and licenses/xz-0BSD.txt.
+  This software includes code from XZ Utils: https://tukaani.org/xz/
+- SQLite (runtime reports 3.53.1): public domain.
+  https://www.sqlite.org/copyright.html
+- Microsoft Visual C++ runtime DLLs accompany the unmodified CPython runtime.
+  Microsoft copyrights apply; these are not Archive Studio source files.
+  https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files
+
+The source release contains the app and tests, without Python runtime binaries.
+DiscordChatExporter and discord-log-parser were architectural/input-format
+references. No binaries or source from those projects are bundled.
+No npm packages, external Python packages, telemetry or cloud-upload clients
+are included. Public upstream license texts were fetched from their owners.

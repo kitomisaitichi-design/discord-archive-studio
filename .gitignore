@@ -1,0 +1,12 @@
+Data/
+Exports/
+.work/
+outputs/
+Recovery/
+Logs/
+__pycache__/
+*.py[cod]
+*.dpapi
+*.sqlite3*
+runtime/
+startup-error.txt
