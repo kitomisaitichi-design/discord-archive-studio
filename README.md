@@ -10,6 +10,8 @@ Download the **Portable ZIP** from [Releases](https://github.com/kitomisaitichi-
 
 - Incremental ID-based scans resume from saved cursors. Ordinary updates fetch only newer messages; full historical rescans require an explicit choice.
 - One serialized export queue with adjustable batches, durable pauses, positive random timing variation and rate-limit waits.
+- Full runtime settings for one task, selected tasks, all non-running tasks, or future additions. Cooling-down work is editable; active work is locked, and checked-field changes preserve other settings and checkpoints.
+- Export form preferences and future queue defaults are saved per account and restored after refresh or relaunch.
 - Independent per-channel schedules from ten minutes to seven days, including local seven-day activity-based timing.
 - Fresh membership and accessible-resource checks before message batches. Access loss stops affected work and preserves saved data.
 - A canonical native message cache generates JSON, HTML, Markdown and plain text locally. Selecting several formats does not fetch each conversation repeatedly.

@@ -33,7 +33,7 @@ class LocalHTTPTests(unittest.TestCase):
         with self.browser.open(self.url+'/') as response:
             self.assertIn('SameSite=Strict',response.headers['Set-Cookie'])
             self.assertIn(b'Keep the conversation.',response.read())
-        for resource in ('app.js','style.css','server-picker.js','queue.js','people.js'):
+        for resource in ('app.js','style.css','server-picker.js','queue.js','queue-settings.js','people.js'):
             with self.browser.open(self.url+'/'+resource) as response:self.assertGreater(len(response.read()),100)
         with self.browser.open(self.url+'/api/state') as response:
             self.assertNotIn('token',json.load(response)['connection'])
@@ -53,6 +53,17 @@ class LocalHTTPTests(unittest.TestCase):
         self.server.connection.account={'id':'8','name':'Other'}
         with self.assertRaises(HTTPError):self.post('schedule',{'scope':'channel:11','enabled':False})
         self.assertEqual(store.schedules()[0]['owner_id'],'7')
+
+    def test_queue_settings_and_preferences_are_owner_scoped_and_return_in_state(self):
+        self.browser.open(self.url+'/').close();store=self.server.store
+        self.server.connection.account={'id':'7','name':'Fixture'}
+        with self.post('queue/preferences',{'owner':'7','options':{'page_delay':10},'minutes':10080,'mode':'adaptive'}) as response:self.assertEqual(json.load(response)['options']['page_delay'],10)
+        with self.post('queue/configure',{'owner':'7','target':'future','changes':{'cooldown_minutes':15}}) as response:self.assertTrue(json.load(response)['future'])
+        with self.browser.open(self.url+'/api/state') as response:
+            state=json.load(response);self.assertEqual(state['queue_defaults'],{'cooldown_minutes':15});self.assertEqual(state['queue_preferences']['minutes'],10080)
+        self.server.connection.account={'id':'8','name':'Other'}
+        with self.assertRaises(HTTPError):self.post('queue/preferences',{'owner':'7','options':{'page_delay':1}})
+        with self.browser.open(self.url+'/api/state') as response:self.assertEqual(json.load(response)['queue_preferences'],{})
 
     def test_sensitive_api_requires_cookie_and_post_requires_origin(self):
         with self.assertRaises(HTTPError) as failure:self.browser.open(self.url+'/api/state')

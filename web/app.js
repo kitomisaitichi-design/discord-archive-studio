@@ -114,13 +114,13 @@ function readOptions() {
     split_count:Number($('split-count').value),split_mb:Number($('split-mb').value),max_media_mb:Number($('max-media').value),
     batch_messages:Number($('batch-messages').value),cooldown_minutes:Number($('batch-cooldown').value),page_delay:Number($('page-delay').value),timing_variation:Number($('timing-variation').value),
     start:$('date-start').value,end:$('date-end').value,people:$('people-filter').value.split(',').map(x=>x.trim()).filter(Boolean),
-    archived_threads:$('include-archived').checked,full_rescan:$('full-rescan').checked,recheck_edits:$('recheck-edits').checked};
+    archived_threads:$('include-archived').checked,full_rescan:$('full-rescan').checked,recheck_edits:$('recheck-edits').checked,_use_queue_defaults:$('use-future-defaults')?.checked!==false};
 }
 function loadOptions(opts) {
   const mappings={include_attachments:'include-attachments',download_media:'download-media',reactions:'include-reactions',edits:'include-edits',
     role_colors:'role-colors',exclude_bots:'exclude-bots',split_count:'split-count',split_mb:'split-mb',max_media_mb:'max-media',
     batch_messages:'batch-messages',cooldown_minutes:'batch-cooldown',page_delay:'page-delay',timing_variation:'timing-variation',start:'date-start',end:'date-end',full_rescan:'full-rescan',recheck_edits:'recheck-edits'};
-  for(const [key,id] of Object.entries(mappings)) { if(opts[key]===undefined)continue; if($(id).type==='checkbox')$(id).checked=opts[key];else $(id).value=opts[key]; }
+  for(const [key,id] of Object.entries(mappings)) { if(opts[key]===undefined)continue;const el=$(id);if(el.tagName==='SELECT'&&!Array.from(el.options).some(o=>o.value===String(opts[key]))){const o=document.createElement('option');o.value=String(opts[key]);o.textContent=key==='cooldown_minutes'?duration(Number(opts[key]))+' · custom':number(opts[key])+' · custom';el.add(o);}if(el.type==='checkbox')el.checked=opts[key];else el.value=opts[key]; }
   document.querySelectorAll('input[name=format]').forEach(x=>x.checked=opts.formats.includes(x.value));
   $('people-filter').value=(opts.people||[]).join(', '); updateSummary();
 }
@@ -153,14 +153,14 @@ function jobHTML(job, history=false) {
   const controls=history ? `<button data-saved-channel="${esc(job.channel_id)}" title="Read locally saved messages">Read messages</button>`+(job.status==='failed'?`<button data-job="${esc(job.id)}" data-action="apply" title="Apply the current export form settings">Use settings</button><button data-job="${esc(job.id)}" data-action="resume">Retry</button>`:'') :
     (allowedPause?`<button data-job="${esc(job.id)}" data-action="pause" title="Pause">Ⅱ</button>`:'')+
     (allowedResume?`<button data-job="${esc(job.id)}" data-action="resume" title="Recheck access and resume">▷</button>`:'')+
-    (['queued','paused','blocked'].includes(job.status)?`<button data-job="${esc(job.id)}" data-action="apply" title="Apply the current export form settings">☷</button>`:'')+
+    (['queued','waiting','paused','blocked'].includes(job.status)?`<button data-queue-settings="${esc(job.id)}" ${job.owner_id===state.settings_owner&&job.id!==state.processing_job?'':'disabled'} title="Edit this task’s full export settings">Settings</button>`:'')+
     (['queued','paused','waiting','blocked'].includes(job.status)?`<button data-job="${esc(job.id)}" data-action="up" title="Move earlier">↑</button><button data-job="${esc(job.id)}" data-action="down" title="Move later">↓</button>`:'')+
     `<button data-job="${esc(job.id)}" data-action="cancel" title="Remove task; keep captured messages">×</button>`;
-  const movable=!history&&['queued','paused','waiting','blocked'].includes(job.status);
-  return `<div class="job-row ${esc(job.status)}" ${history?'':`data-queue-job="${esc(job.id)}" data-movable="${movable}"`}><div class="job-label">${movable?'<span class="drag-handle" draggable="false" title="Drag to reorder; arrows also move this task" aria-label="Drag task">⠿</span>':''}<strong>${esc(job.server_name)} <span class="muted"># ${esc(job.channel_name)}</span></strong><small>${job.options.formats.map(x=>x.toUpperCase()).join(' · ')} · ${number(job.options.batch_messages)} per batch</small></div><div class="job-progress"><div class="progress-track"><div class="progress-fill"></div></div><div class="job-state"><span class="job-detail" title="${esc(job.detail)}"><span class="status-label">${esc(job.status)}</span> · ${esc(job.detail||'Ready to begin')}</span><span>${number(job.progress)} scanned</span></div></div><div class="job-controls">${controls}</div></div>`;
+  const movable=!history&&job.id!==state.processing_job&&['queued','paused','waiting','blocked'].includes(job.status);
+  return `<div class="job-row ${esc(job.status)}" ${history?'':`data-queue-job="${esc(job.id)}" data-movable="${movable}"`}><div class="job-label">${movable?'<span class="drag-handle" draggable="false" title="Drag to reorder; arrows also move this task" aria-label="Drag task">⠿</span>':''}${history?'':`<input class="queue-select" type="checkbox" data-select-queue="${esc(job.id)}" aria-label="Select ${esc(job.channel_name)}" ${movable&&job.owner_id===state.settings_owner?'':'disabled'} ${typeof queueSelection!=='undefined'&&queueSelection.has(job.id)?'checked':''}>`}<strong>${esc(job.server_name)} <span class="muted"># ${esc(job.channel_name)}</span></strong><small>${job.options.formats.map(x=>x.toUpperCase()).join(' · ')} · ${number(job.options.batch_messages)} per batch · ${duration(job.options.cooldown_minutes)} rest</small></div><div class="job-progress"><div class="progress-track"><div class="progress-fill"></div></div><div class="job-state"><span class="job-detail" title="${esc(job.detail)}"><span class="status-label">${esc(job.status)}</span> · ${esc(job.detail||'Ready to begin')}</span><span>${number(job.progress)} scanned</span></div></div><div class="job-controls">${controls}</div></div>`;
 }
 function renderQueue() {
-  const signature=JSON.stringify([state.queue,state.history,state.schedules,state.publications]);
+  const signature=JSON.stringify([state.queue,state.history,state.schedules,state.publications,state.processing_job]);
   if(signature!==queueSignature&&!(typeof draggedJob!=='undefined'&&draggedJob)){
     const scrolls=[$('tray-jobs'),$('queue-detail')].map(e=>e.scrollTop);
     $('tray-jobs').innerHTML=state.queue.map(j=>jobHTML(j)).join('');
@@ -310,6 +310,7 @@ function applyState(value) {
   if(value.stats.messages!==knownMessageCount){if(currentPage==='library'&&was)$('library-updates').hidden=false;knownMessageCount=value.stats.messages;preview();}
   if(value.worker_error&&value.worker_error!==was?.worker_error)toast(value.worker_error,true);
   if(typeof updatePeopleAccount==='function')updatePeopleAccount();
+  if(typeof updateQueueSettingsState==='function')updateQueueSettingsState();
 }
 function connectEvents() {
   stream?.close();stream=new EventSource('/api/events');

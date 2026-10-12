@@ -28,6 +28,8 @@ class Store:
     def __init__(self, root):
         self.version = 0
         self.archive_lock = threading.RLock()
+        self.queue_lock = threading.RLock()
+        self.processing_job = None
         self.changed = threading.Condition()
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
@@ -323,11 +325,15 @@ class Store:
             return [dict(r) for r in db.execute('SELECT u.id,u.name,a.person_id FROM users u LEFT JOIN aliases a ON a.user_id=u.id ORDER BY u.name LIMIT 3000')]
 
     def enqueue(self, channels, owner, options, scheduled=False):
-        if scheduled:
-            options = dict(options,full_rescan=False,_scheduled=True)
+        options=dict(options)
         ids = []
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
+            defaults=db.execute('SELECT value FROM settings WHERE key=?',('queue_defaults:'+owner,)).fetchone()
+            if options.pop('_use_queue_defaults',True) and defaults:
+                for k,v in json.loads(defaults['value']).items():
+                    if k not in options.get('_queue_overrides',[]):options[k]=v
+            if scheduled:options.update(full_rescan=False,_scheduled=True)
             position = db.execute('SELECT COALESCE(max(position),0) FROM jobs').fetchone()[0]
             for cid in dict.fromkeys(map(valid_id, channels)):
                 row = db.execute('SELECT type FROM channels WHERE id=?', (cid,)).fetchone()
@@ -338,8 +344,12 @@ class Store:
                     if existing['status'] in ('running', 'waiting') and scheduled:
                         db.execute('UPDATE jobs SET dirty=1 WHERE id=?', (existing['id'],))
                     elif existing['status'] == 'queued' and not scheduled:
-                        internal={k:v for k,v in json.loads(existing['options']).items() if k.startswith('_')}
-                        db.execute('UPDATE jobs SET options=? WHERE id=?', (packed(dict(options,**internal)), existing['id']))
+                        previous=json.loads(existing['options'])
+                        internal={k:v for k,v in previous.items() if k.startswith('_')}
+                        merged=dict(options,**internal)
+                        for k in previous.get('_queue_overrides',[]):
+                            if k in previous:merged[k]=previous[k]
+                        db.execute('UPDATE jobs SET options=? WHERE id=?', (packed(merged), existing['id']))
                     ids.append(existing['id'])
                     continue
                 jid = uuid.uuid4().hex
@@ -372,11 +382,25 @@ class Store:
         with self.db() as db:
             db.execute('UPDATE jobs SET ' + ','.join(k+'=?' for k in fields) + ' WHERE id=?', list(fields.values())+[jid])
 
+    def claim_job(self, jid, owner):
+        with self.queue_lock,self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            changed=db.execute("UPDATE jobs SET status='running' WHERE id=? AND owner_id=? AND status IN ('queued','waiting')",(jid,owner)).rowcount
+            if changed:self.processing_job=jid
+            return bool(changed)
+
+    def release_job(self, jid):
+        with self.queue_lock:
+            if self.processing_job==jid:
+                self.processing_job=None
+                with self.changed:
+                    self.version+=1;self.changed.notify_all()
+
     def reorder(self, jid, before=None, direction=None):
-        with self.db() as db:
+        with self.queue_lock,self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             rows=db.execute("SELECT id,position,status FROM jobs WHERE status NOT IN ('completed','cancelled','failed') ORDER BY position").fetchall()
-            movable=[r for r in rows if r['status']!='running']
+            movable=[r for r in rows if r['status']!='running' and r['id']!=self.processing_job]
             ids=[r['id'] for r in movable]
             if jid not in ids:raise ValueError('This task is exporting or no longer movable. Refresh the queue.')
             if direction:
@@ -403,15 +427,75 @@ class Store:
             raise ValueError('This action is not available for this task state.')
 
     def configure_job(self, jid, opts):
-        job = self.job(jid)
-        if job['status'] not in ('queued','paused','failed','blocked'):
-            raise ValueError('Pause this task before changing its settings.')
-        merged = dict(opts, **{k:v for k,v in job['options'].items() if k.startswith('_')})
-        with self.db() as db:
+        with self.queue_lock,self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute('SELECT * FROM jobs WHERE id=?',(jid,)).fetchone()
+            if not row or row['id']==self.processing_job or row['status'] not in ('queued','waiting','paused','failed','blocked'):
+                raise ValueError('This task is actively exporting or no longer editable.')
+            job=dict(row,options=json.loads(row['options']))
+            merged = dict(opts, **{k:v for k,v in job['options'].items() if k.startswith('_')})
             if opts.get('full_rescan') and not job['options'].get('full_rescan'):
                 db.execute("UPDATE jobs SET options=?,cursor=NULL,boundary=NULL,phase='messages',progress=0,detail='Settings updated; full history recheck requested.' WHERE id=?", (packed(opts),jid))
             else:
                 db.execute("UPDATE jobs SET options=?,detail='Settings updated; checkpoint preserved.' WHERE id=?", (packed(merged),jid))
+
+    def configure_queue(self, owner, target, changes, ids=None, future=False):
+        from .exporting import DEFAULT_OPTIONS,options
+        if target not in ('items','all','future'):raise ValueError('Choose current tasks or future defaults.')
+        if not isinstance(changes,dict) or not changes or set(changes)-(set(DEFAULT_OPTIONS)-{'full_rescan'}):
+            raise ValueError('Choose supported settings to change. Full-history rescans remain explicit Export actions.')
+        normalized=options(changes)
+        patch={k:normalized[k] for k in changes}
+        if ids is not None and (not isinstance(ids,list) or len(ids)>20000 or any(not isinstance(i,str) for i in ids)):
+            raise ValueError('Choose a bounded list of queue tasks.')
+        with self.queue_lock,self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            rows=[]
+            if target=='all':
+                rows=db.execute("SELECT * FROM jobs WHERE owner_id=? AND id<>? AND status IN ('queued','waiting','paused','blocked','failed')",(owner,self.processing_job or '')).fetchall()
+            elif target=='items':
+                if not ids:raise ValueError('Select one or more tasks.')
+                for jid in dict.fromkeys(ids):
+                    row=db.execute('SELECT * FROM jobs WHERE id=?',(jid,)).fetchone()
+                    if not row or row['owner_id']!=owner:raise ValueError('A selected task is missing or belongs to another account.')
+                    if row['id']==self.processing_job or row['status'] not in ('queued','waiting','paused','blocked','failed'):
+                        raise ValueError('A selected task started exporting or is no longer editable. Refresh the queue.')
+                    rows.append(row)
+            replacements=[]
+            for row in rows:
+                old=json.loads(row['options']);new=options(dict(old,**patch))
+                new['_queue_overrides']=sorted(set(old.get('_queue_overrides',[]))|set(patch))
+                replacements.append((packed(new),row['id']))
+            for opts,jid in replacements:
+                db.execute("UPDATE jobs SET options=?,detail='Settings updated; checkpoint and current rest preserved.' WHERE id=?",(opts,jid))
+            if target=='future' or future:
+                key='queue_defaults:'+owner
+                old=db.execute('SELECT value FROM settings WHERE key=?',(key,)).fetchone()
+                merged=dict(json.loads(old['value']) if old else {},**patch)
+                options(merged)
+                db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)',(key,packed(merged)))
+            return {'changed':len(rows),'future':target=='future' or bool(future)}
+
+    def save_queue_preferences(self, owner, value):
+        from .exporting import options
+        if not isinstance(value,dict):raise ValueError('Settings must be an object.')
+        opts=options(value.get('options'));opts={k:v for k,v in opts.items() if not k.startswith('_')}
+        opts['full_rescan']=False
+        scope=value.get('scope','server');mode=value.get('mode','fixed')
+        if scope not in ('server','channel') or mode not in ('fixed','adaptive'):raise ValueError('Invalid schedule controls.')
+        saved={'options':opts,'scope':scope,'mode':mode,'minutes':max(10,min(int(value.get('minutes',1440)),10080)),
+               'use_defaults':bool(value.get('use_defaults',True)),'advanced':bool(value.get('advanced',False)),
+               'updated':float(value.get('updated',time.time()*1000))}
+        import math
+        if not math.isfinite(saved['updated']):raise ValueError('Invalid settings timestamp.')
+        key='queue_preferences:'+owner
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute('SELECT value FROM settings WHERE key=?',(key,)).fetchone()
+            old=json.loads(row['value']) if row else {}
+            if old.get('updated',0)>saved['updated']:return old
+            db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)',(key,packed(saved)))
+        return saved
 
     def schedule(self, scope, owner, enabled, mode, minutes, options):
         options = dict(options,full_rescan=False)

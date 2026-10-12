@@ -2,6 +2,14 @@
 
 ## Verified
 
+- Runtime settings checks cover waiting-task edits, selected/all/future targets,
+  transactional claim/edit races with the actual worker loop, rollback on
+  stale/running/cross-account selection, untouched options/checkpoints/rest,
+  future manual/DM/scheduled additions, explicit overrides, per-account
+  preferences, restart persistence and stale-save timestamp protection.
+- Actual isolated UI checked cooling-down edits, bulk changes while running
+  work stayed locked, empty/double submission, future-only updates, and form
+  restoration after refresh and a service restart on a different browser origin.
 - Native cscript discovery checks verify whole-folder relocation, depth six
   success/depth seven rejection and explicit ambiguity handling. No live
   recipient library was moved as a test.
@@ -29,7 +37,7 @@
   tasks and saved message checkpoints were retained; capture continued beyond
   6,000 messages. Live contact metadata validated 140 contacts and 63 friends,
   without initiating a bulk DM export as a test.
-- 81 Python unittest checks pass: canonical ID/hash deduplication, edit history,
+- 92 Python unittest checks pass: canonical ID/hash deduplication, edit history,
   FTS search, import quality/rollback, aliases, scheduling, queue restart/catch-up,
   access gating, 403/404 no retry, 429 pacing, HTTP authorization, DPAPI/AES-GCM,
   independent channel export views, atomic ZIPs, and manual attachment bounds.

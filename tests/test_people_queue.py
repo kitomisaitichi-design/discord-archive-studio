@@ -45,6 +45,11 @@ class PeopleTests(unittest.TestCase):
         value=self.people.refresh(self.api,OWNER,force=True)
         alice=next(p for p in value['contacts'] if p['id']==UID)
         self.assertEqual(alice['name'],'Renamed Alice');self.assertTrue(alice['friend'])
+    def test_future_defaults_apply_to_people_without_leaking_server_person_filter(self):
+        self.store.configure_queue(OWNER,'future',{'cooldown_minutes':30,'people':[CAROL]})
+        self.people.queue(self.api,OWNER,[UID],self.opts)
+        job=self.store.jobs()[0];self.assertEqual(job['options']['cooldown_minutes'],30);self.assertEqual(job['options']['people'],[])
+
     def test_bulk_queue_deduplicates_shared_dm_and_repeated_actions(self):
         result=self.people.queue(self.api,OWNER,[UID,BOB,UID],self.opts,groups=True,adaptive=True)
         self.assertEqual(result['chats'],3);self.assertEqual(len(self.store.jobs()),3)

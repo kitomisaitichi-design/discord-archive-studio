@@ -55,7 +55,11 @@ class Server(ThreadingHTTPServer):
         with self.store.db() as db:
             pubs = [dict(r) for r in db.execute('SELECT server_id,path,updated,size FROM publications')]
             presets = [dict(r, options=json.loads(r['options'])) for r in db.execute('SELECT * FROM presets ORDER BY name')]
+        owner=self.connection.account['id'] if self.connection.account else self.store.setting('account_id','local')
         return {'version': self.store.version, 'connection': self.connection.status(), 'servers': self.store.servers(),
+                'settings_owner':owner,'queue_defaults':self.store.setting('queue_defaults:'+owner,{}),
+                'processing_job':self.store.processing_job,
+                'queue_preferences':self.store.setting('queue_preferences:'+owner,{}),
                 'channels': channels, 'queue': self.store.jobs(), 'history': self.store.jobs(True),
                 'stats': self.store.stats(), 'schedules': self.store.schedules(), 'publications': pubs,
                 'schedule_recovery': bool(self.store.setting('removed_schedules:'+self.connection.account['id'],[])) if self.connection.account else False,
@@ -120,7 +124,7 @@ class Handler(BaseHTTPRequestHandler):
             route = urlparse(self.path)
             query = {k: v[-1] for k, v in parse_qs(route.query).items()}
             if route.path == '/api/health':
-                self.json({'app': 'Discord Archive Studio', 'version': '1.1.0','library_id':library_identity(self.server.store.root)})
+                self.json({'app': 'Discord Archive Studio', 'version': '1.2.0','library_id':library_identity(self.server.store.root)})
                 return
             if route.path in ('/', '/index.html'):
                 payload = (self.server.web / 'index.html').read_bytes()
@@ -180,7 +184,7 @@ class Handler(BaseHTTPRequestHandler):
                 with path.open('rb') as source:
                     while block := source.read(256*1024):
                         self.wfile.write(block)
-            elif route.path in ('/app.js', '/style.css', '/server-picker.js', '/queue.js', '/people.js'):
+            elif route.path in ('/app.js', '/style.css', '/server-picker.js', '/queue.js', '/queue-settings.js', '/people.js'):
                 path = self.server.web / route.path.lstrip('/')
                 payload = path.read_bytes()
                 self.send_headers(kind='text/javascript; charset=utf-8' if path.suffix=='.js' else 'text/css; charset=utf-8', length=len(payload))
@@ -314,6 +318,17 @@ class Handler(BaseHTTPRequestHandler):
         elif path == '/api/people/enqueue':
             if not connection.account or not connection.token:raise ValueError('Connect to Discord before queueing DM chats.')
             result=self.server.people.queue(connection.api(),connection.account['id'],data.get('users'),options(data.get('options')),bool(data.get('groups')),bool(data.get('friends')),bool(data.get('adaptive')))
+            worker.signal()
+            return result
+        elif path == '/api/queue/preferences':
+            owner=connection.account['id'] if connection.account else store.setting('account_id','local')
+            if data.get('owner',owner)!=owner:raise ValueError('The connected account changed; reload its settings before saving.')
+            return store.save_queue_preferences(owner,data)
+        elif path == '/api/queue/configure':
+            owner=connection.account['id'] if connection.account else store.setting('account_id')
+            if not owner:raise ValueError('Connect the original account before configuring queue tasks.')
+            if data.get('owner',owner)!=owner:raise ValueError('The connected account changed; reload its queue before saving.')
+            result=store.configure_queue(owner,data.get('target'),data.get('changes'),data.get('ids'),bool(data.get('future')))
             worker.signal()
             return result
         elif path == '/api/reorder':

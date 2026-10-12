@@ -74,7 +74,7 @@ class People:
         channels=list(dict.fromkeys(channels))
         if not channels:raise ValueError('No currently available DM chats match this selection. Refresh People after opening the chat normally in Discord.')
         # People exports are whole conversations. A hidden server-person filter or full-rescan flag must not leak into this bulk action.
-        opts=dict(opts,full_rescan=False,people=[])
+        opts=dict(opts,full_rescan=False,people=[],_queue_overrides=['people'])
         jobs=self.store.enqueue(channels,owner,opts)
         if adaptive:
             scopes={s['scope'] for s in self.store.schedules()}

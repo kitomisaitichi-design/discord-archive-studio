@@ -386,8 +386,7 @@ class Worker:
                     candidates = [j for j in self.store.jobs() if j['status'] in ('queued', 'waiting') and j['owner_id'] == self.connection.account['id']]
                     if candidates:
                         job = candidates[0]
-                        with self.store.db() as db:
-                            changed = db.execute("UPDATE jobs SET status='running' WHERE id=? AND status IN ('queued','waiting')", (job['id'],)).rowcount
+                        changed=self.store.claim_job(job['id'],self.connection.account['id'])
                         if changed:
                             try:
                                 self.process(self.store.job(job['id']))
@@ -405,6 +404,8 @@ class Worker:
                             except Exception as error:
                                 self.store.update_job(job['id'], status='failed', detail=str(error))
                                 self.store.set_setting('cooldown_until', time.time()+900)
+                            finally:
+                                self.store.release_job(job['id'])
                 self.process_media()
             except Exception as error:
                 self.store.set_setting('worker_error', str(error))

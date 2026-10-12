@@ -1,4 +1,4 @@
-DISCORD ARCHIVE STUDIO 1.1.0 — WINDOWS x64
+DISCORD ARCHIVE STUDIO 1.2.0 — WINDOWS x64
 
 START
 The VBS first checks its own folder and immediate parent. If separated from the
@@ -32,6 +32,17 @@ BROWSER CONNECTION — ONE-TIME SETUP
    shown in Archive Studio Settings. Disconnect/switch account revokes pairing.
 
 PACE AND SCHEDULES
+Queue: use Settings beside a task, or select tasks and choose Edit selected /
+Edit all non-running / Future defaults. Only checked fields change. Running
+tasks stay locked; waiting/cooling tasks are editable. Checkpoints and an
+already committed batch rest are retained; new rest settings apply afterwards.
+Future defaults apply to new manual, People and scheduled tasks. Explicit item
+overrides survive repeated enqueueing. Uncheck Use saved future defaults in
+Export to use the current form instead for those new additions.
+The Export form saves valid settings automatically, per account, including
+schedule controls and advanced options. Refresh/relaunch restores them. The
+one-off full-history rescan checkbox is deliberately not saved for next launch.
+
 History lists saved conversations and counts, including unfinished batches.
 Read messages opens the local transcript. Schedules has search, checkboxes,
 Select filtered, Pause/Enable selected, Remove selected, Clear all and Undo.
