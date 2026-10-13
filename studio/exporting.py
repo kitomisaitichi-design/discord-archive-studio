@@ -232,7 +232,10 @@ class Exporter:
         media = {aid:dict(saved,size=max(saved['size'],(self.store.root/saved['relative_path']).stat().st_size)) for aid,saved in media.items() if (self.store.root/saved['relative_path']).is_file()}
         view_keys = ('formats','download_media','include_attachments','include_avatars','max_media_mb','reactions','edits','role_colors','split_count','split_mb','exclude_bots','people','start','end')
         presentation = {c['id']:{k:views.get(c['id'],opts)[k] for k in view_keys} for c in channels}
-        digest = fingerprint({'reader_schema':1,'server_name':server_name,'channels': [(c['id'], c['name'], c['generation'], c['history_done']) for c in channels], 'options': presentation})
+        with self.store.db() as db:
+            pictured_users={r[0] for r in db.execute("SELECT DISTINCT m.author_id FROM messages m JOIN channels c ON c.id=m.channel_id JOIN channel_exports e ON e.channel_id=c.id WHERE c.server_id=? AND json_extract(e.options,'$.include_avatars')=1",(server_id,))}
+        picture_versions={key:saved['hash'] for key,saved in avatars.items() if key.split(':',1)[0] in pictured_users}
+        digest = fingerprint({'reader_schema':1,'server_name':server_name,'channels': [(c['id'], c['name'], c['generation'], c['history_done']) for c in channels], 'options': presentation,'avatars':picture_versions})
         target = destination / ('server_%s.zip' % server_id)
         if previous and previous['hash'] == digest and previous['path'] == str(target) and target.is_file():
             return {'path': str(target), 'unchanged': True, 'bytes': target.stat().st_size}

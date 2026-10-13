@@ -24,6 +24,19 @@ class LocalHTTPTests(unittest.TestCase):
     def tearDown(self):
         self.server.shutdown();self.server.server_close();self.thread.join(2);self.temp.cleanup()
 
+    def test_visible_avatar_endpoint_resolves_saved_ids_and_rejects_arbitrary_urls(self):
+        from test_studio import SID,CID,UID,message
+        from studio.reader_library import library_id
+        self.browser.open(self.url+'/reader.html').close()
+        self.server.store.catalog([{'id':SID,'name':'Fixture'}],[{'id':CID,'name':'chat'}],SID)
+        m=message(9001);m['author']['avatar']='a'*32;self.server.store.upsert(CID,[m])
+        for source in ({},{'archive':library_id(SID),'channel':CID}):
+            with self.post('avatars/visible',dict(source,messages=['9001','9999'])) as response:
+                result=json.load(response);self.assertEqual(result['pictures']['9001']['status'],'queued');self.assertNotIn('9999',result['pictures'])
+        self.assertEqual(len(self.server.worker.exporter.avatars.tasks()),1)
+        for bad in ([],['https://evil.test/picture'],['9001']*81):
+            with self.assertRaises(HTTPError):self.post('avatars/visible',{'messages':bad})
+
     def post(self,path,data,headers=None):
         return self.browser.open(Request(self.url+'/api/'+path,data=json.dumps(data).encode(),headers={'Content-Type':'application/json','X-Studio-Action':'local',**(headers or {})}),timeout=3)
 
@@ -33,7 +46,7 @@ class LocalHTTPTests(unittest.TestCase):
         with self.browser.open(self.url+'/') as response:
             self.assertIn('SameSite=Strict',response.headers['Set-Cookie'])
             self.assertIn(b'Keep the conversation.',response.read())
-        for resource in ('app.js','style.css','server-picker.js','queue.js','queue-settings.js','people.js','archives.js','reader.js','reader.css'):
+        for resource in ('app.js','style.css','server-picker.js','queue.js','queue-settings.js','people.js','archives.js','reader.js','reader.css','avatar-cache.js'):
             with self.browser.open(self.url+'/'+resource) as response:self.assertGreater(len(response.read()),100)
         with self.browser.open(self.url+'/api/state') as response:
             self.assertNotIn('token',json.load(response)['connection'])

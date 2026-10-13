@@ -378,19 +378,26 @@ class Worker:
             self.store.update_media(aid,status='failed',detail='Download failed: '+str(error)+'. Signed links may expire; rescan text and retry explicitly.')
         self.store.set_setting('media_next',time.time()+5)
 
+    def avatar_window(self):
+        jobs=self.store.jobs()
+        return not self.stop.is_set() and not any(j['status']=='running' for j in jobs) and (
+            not any(j['status'] in ('queued','waiting') for j in jobs) or time.time()+2 < self.store.setting('cooldown_until',0))
+
     def process_avatar(self):
-        if self.stop.is_set() or self.text_pending() or time.time()<self.store.setting('media_next',0): return
+        if not self.avatar_window() or time.time()<self.store.setting('media_next',0): return
         avatars = self.exporter.avatars
         tasks = [t for t in avatars.tasks() if t['status']=='queued']
         if not tasks: return
         task = min(tasks,key=lambda t:t['updated']); key = task['key']
         avatars.update(key,'running','Downloading selected profile picture…')
         def control():
-            return not self.stop.is_set() and not self.text_pending() and any(t['key']==key and t['status']=='running' for t in avatars.tasks())
+            return self.avatar_window() and any(t['key']==key and t['status']=='running' for t in avatars.tasks())
         try:
             avatars.fetch(task,control)
             if not control(): raise Interrupted('Yielded to text work.')
-            for sid in avatars.servers(key):
+            with self.store.db() as db:
+                enabled={r[0] for r in db.execute("SELECT DISTINCT c.server_id FROM channels c JOIN channel_exports e ON e.channel_id=c.id WHERE json_extract(e.options,'$.include_avatars')=1")}
+            for sid in (s for s in avatars.servers(key) if s in enabled):
                 self.exporter.publish(sid,options(None),self.destination(),control,selected_channels=[])
             avatars.update(key,'completed','Saved locally; server ZIPs updated where pictures are enabled.')
         except Interrupted:

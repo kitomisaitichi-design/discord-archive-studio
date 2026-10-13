@@ -1,4 +1,4 @@
-DISCORD ARCHIVE STUDIO 1.3.1 — WINDOWS x64
+DISCORD ARCHIVE STUDIO 1.3.2 — WINDOWS x64
 
 START
 The VBS first checks its own folder and immediate parent. If separated from the
@@ -247,10 +247,12 @@ and your theme are remembered in the browser. Reader indexes and opened ZIPs
 live under Data/reader-cache and Data/reader-archives, separate from the working
 message database; opening one does not re-import it into your main library.
 
-OPTIONAL PROFILE PICTURES
+PROFILE PICTURES
 Enable Cache and include profile pictures in Export's advanced settings, or
-in the full queue editor, to queue captured authors after message work. The
-choice saves with your settings; default is off. Library also offers Queue
+in the full queue editor, to queue larger saved author selections. Visible pictures
+cache automatically as you browse Library and the ZIP reader, including during
+committed batch rests. The
+ZIP inclusion choice saves with your settings; default is off. Library also offers Queue
 profile pictures for its channel/server filters or all saved chats, with
 explicit retries. Enable inclusion and Update ZIP from saved data to embed
 already cached pictures in existing exports. Text history is not re-fetched.

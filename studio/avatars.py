@@ -1,4 +1,4 @@
-"""Opt-in profile images, keyed by captured user ID and avatar version."""
+"""Bounded profile images, keyed by captured user ID and avatar version."""
 import hashlib
 import json
 import os
@@ -67,13 +67,36 @@ class Avatars:
                     task = db.execute('SELECT status FROM avatar_tasks WHERE key=?',(key,)).fetchone()
                     if task and (task[0] in ('queued','running') or not retry): continue
                     if available <= 0: deferred += 1; continue
-                    db.execute('INSERT OR REPLACE INTO avatar_tasks VALUES(?,?,?,?,?)',(key,url,'queued','Selected; waits until text exports finish.',time.time()))
+                    db.execute('INSERT OR REPLACE INTO avatar_tasks VALUES(?,?,?,?,?)',(key,url,'queued','Selected; waits for a committed text rest.',time.time()))
                     available -= 1; count += 1
         return {'queued':count,'cached':reused,'deferred':deferred}
 
     def update(self, key, status, detail):
         with self.store.db() as db:
             db.execute('UPDATE avatar_tasks SET status=?,detail=?,updated=? WHERE key=?',(status,detail,time.time(),key))
+
+    def visible(self, authors):
+        """Authors come from saved message rows, never caller-supplied CDN URLs."""
+        result = {}; queued = 0
+        with self.store.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            pending = db.execute("SELECT count(*) FROM avatar_tasks WHERE status IN ('queued','running')").fetchone()[0]
+            media = db.execute("SELECT count(*),coalesce(sum(max_bytes),0) FROM media_requests WHERE status IN ('queued','running')").fetchone()
+            available = min(50-media[0]-pending,(100_000_000-media[1]-pending*1_000_000)//1_000_000)
+            for mid, author in authors.items():
+                captured = avatar_key(author)
+                if not captured: result[mid] = {'status':'unavailable'}; continue
+                key, url = captured
+                saved = db.execute('SELECT hash FROM avatars WHERE key=?',(key,)).fetchone()
+                if saved and (self.store.root/'avatars'/saved[0]).is_file():
+                    result[mid] = {'status':'cached','url':'/avatar/'+saved[0]}; continue
+                task = db.execute('SELECT status FROM avatar_tasks WHERE key=?',(key,)).fetchone()
+                if task:
+                    result[mid] = {'status':task[0]}; continue
+                if available <= 0: result[mid] = {'status':'deferred'}; continue
+                db.execute('INSERT INTO avatar_tasks VALUES(?,?,?,?,?)',(key,url,'queued','Visible author; waits for a committed text rest.',time.time()))
+                available -= 1; queued += 1; result[mid] = {'status':'queued'}
+        return {'pictures':result,'queued':queued}
 
     def fetch(self, task, control):
         cached = self.cached().get(task['key'])
@@ -91,8 +114,6 @@ class Avatars:
                 else: os.replace(temp,target)
                 with self.store.db() as db:
                     db.execute('INSERT OR REPLACE INTO avatars VALUES(?,?,?,?)',(task['key'],digest,kind,size))
-                    uid = task['key'].split(':',1)[0]
-                    db.execute('UPDATE channels SET generation=generation+1 WHERE id IN (SELECT DISTINCT channel_id FROM messages WHERE author_id=?)',(uid,))
             return size
         finally:
             temp.unlink(missing_ok=True)

@@ -379,6 +379,19 @@ class ZipReader:
             messages = [dict(json.loads(r['raw']),_seq=r['seq']) for r in rows]
             return {'generation':generation,'messages':messages,'total':total,'first':first,'last':last,'before':before,'after':after}
 
+    def saved_authors(self, key, channel, ids):
+        entry=next((e for e in reader_library.entries(self.store) if e['id']==key),None)
+        placeholders=','.join('?' for _ in ids)
+        if entry:
+            with self.store.db() as db:
+                rows=db.execute('SELECT m.id,m.raw FROM messages m JOIN channels c ON c.id=m.channel_id WHERE c.server_id=? AND m.channel_id=? AND m.id IN ('+placeholders+')',[entry['server_id'],channel]+ids).fetchall()
+        else:
+            path,_,_=self.index(key)
+            with closing(sqlite3.connect(path)) as db:
+                db.row_factory=sqlite3.Row
+                rows=db.execute('SELECT id,raw FROM messages WHERE channel=? AND id IN ('+placeholders+')',[channel]+ids).fetchall()
+        return {r['id']:json.loads(r['raw']).get('author') or {} for r in rows}
+
     def asset(self, key, asset_id):
         if any(e['id']==key for e in reader_library.entries(self.store)):
             return reader_library.asset(self.store,asset_id)

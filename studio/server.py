@@ -129,7 +129,7 @@ class Handler(BaseHTTPRequestHandler):
             route = urlparse(self.path)
             query = {k: v[-1] for k, v in parse_qs(route.query).items()}
             if route.path == '/api/health':
-                self.json({'app': 'Discord Archive Studio', 'version': '1.3.1','library_id':library_identity(self.server.store.root)})
+                self.json({'app': 'Discord Archive Studio', 'version': '1.3.2','library_id':library_identity(self.server.store.root)})
                 return
             if route.path in ('/', '/index.html', '/reader.html'):
                 payload = (self.server.web / ('reader.html' if route.path == '/reader.html' else 'index.html')).read_bytes()
@@ -210,7 +210,7 @@ class Handler(BaseHTTPRequestHandler):
                 with path.open('rb') as source:
                     while block := source.read(256*1024):
                         self.wfile.write(block)
-            elif route.path in ('/app.js', '/style.css', '/server-picker.js', '/queue.js', '/queue-settings.js', '/people.js', '/archives.js', '/reader.js', '/reader.css'):
+            elif route.path in ('/app.js', '/style.css', '/server-picker.js', '/queue.js', '/queue-settings.js', '/people.js', '/archives.js', '/reader.js', '/reader.css', '/avatar-cache.js'):
                 path = self.server.web / route.path.lstrip('/')
                 payload = path.read_bytes()
                 self.send_headers(kind='text/javascript; charset=utf-8' if path.suffix=='.js' else 'text/css; charset=utf-8', length=len(payload))
@@ -380,6 +380,20 @@ class Handler(BaseHTTPRequestHandler):
         elif path == '/api/media/cancel':
             store.update_media(valid_id(data['id']),status='cancelled',detail='Cancelled manually; existing cached files retained.')
             worker.signal()
+        elif path == '/api/avatars/visible':
+            ids = data.get('messages')
+            if not isinstance(ids,list) or not 1 <= len(ids) <= 80 or any(not isinstance(i,str) or not re.fullmatch(r'\d{1,22}',i) for i in ids):
+                raise ValueError('Choose up to 80 saved message IDs.')
+            ids=list(dict.fromkeys(ids))
+            if data.get('archive'):
+                authors=self.server.reader.saved_authors(data['archive'],data.get('channel',''),ids)
+            else:
+                with store.db() as db:
+                    rows=db.execute('SELECT id,raw FROM messages WHERE id IN ('+','.join('?' for _ in ids)+')',ids).fetchall()
+                authors={r['id']:json.loads(r['raw']).get('author') or {} for r in rows}
+            result=worker.exporter.avatars.visible(authors)
+            if result['queued']: worker.signal()
+            return result
         elif path == '/api/avatars/select':
             result = worker.exporter.avatars.queue(data.get('channels'),retry=True)
             worker.signal(); return result
