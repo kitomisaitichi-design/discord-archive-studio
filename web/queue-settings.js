@@ -58,7 +58,11 @@ const prefsControl=document.createElement('div');prefsControl.className='saved-p
 $('page-export').querySelector('.page-heading').after(prefsControl);
 document.addEventListener('click',e=>{const b=e.target.closest('button');if(b?.dataset.queueSettings)openQueueEditor('items',[b.dataset.queueSettings]);});
 document.addEventListener('change',e=>{if(e.target.dataset.selectQueue){e.target.checked?queueSelection.add(e.target.dataset.selectQueue):queueSelection.delete(e.target.dataset.selectQueue);queueSignature='';renderQueue();updateQueueSettingsState();}});
-$('select-editable-queue').onclick=()=>{queueSelection=new Set(editableQueueJobs().filter(j=>state.queue.some(q=>q.id===j.id)).map(j=>j.id));queueSignature='';renderQueue();updateQueueSettingsState();};
+$('select-editable-queue').textContent='Check all';
+const invertQueue=document.createElement('button');invertQueue.id='invert-queue-selection';invertQueue.textContent='Invert selection';$('select-editable-queue').after(invertQueue);
+function presentEditableQueue(){return editableQueueJobs().filter(j=>state.queue.some(q=>q.id===j.id));}
+$('select-editable-queue').onclick=()=>{queueSelection=new Set(presentEditableQueue().map(j=>j.id));queueSignature='';renderQueue();updateQueueSettingsState();};
+invertQueue.onclick=()=>{queueSelection=new Set(presentEditableQueue().filter(j=>!queueSelection.has(j.id)).map(j=>j.id));queueSignature='';renderQueue();updateQueueSettingsState();};
 $('clear-queue-selection').onclick=()=>{queueSelection.clear();queueSignature='';renderQueue();updateQueueSettingsState();};
 $('edit-selected-queue').onclick=()=>openQueueEditor('items',[...queueSelection]);$('edit-all-queue').onclick=()=>openQueueEditor('all');$('edit-future-queue').onclick=()=>openQueueEditor('future');
 $('close-queue-settings').onclick=()=>$('queue-settings-dialog').close();$('queue-settings-target').onchange=renderQueueEditor;

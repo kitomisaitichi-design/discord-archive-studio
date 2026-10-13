@@ -42,7 +42,7 @@ class Server(ThreadingHTTPServer):
         self.window_state = {}
         self.native_window_enabled = False
         self.people = People(store)
-        self.reader = ZipReader(store)
+        self.reader = ZipReader(store,app_root=self.web.parent)
 
     def state(self):
         destination = self.worker.destination()
@@ -129,7 +129,7 @@ class Handler(BaseHTTPRequestHandler):
             route = urlparse(self.path)
             query = {k: v[-1] for k, v in parse_qs(route.query).items()}
             if route.path == '/api/health':
-                self.json({'app': 'Discord Archive Studio', 'version': '1.3.0','library_id':library_identity(self.server.store.root)})
+                self.json({'app': 'Discord Archive Studio', 'version': '1.3.1','library_id':library_identity(self.server.store.root)})
                 return
             if route.path in ('/', '/index.html', '/reader.html'):
                 payload = (self.server.web / ('reader.html' if route.path == '/reader.html' else 'index.html')).read_bytes()
@@ -142,7 +142,7 @@ class Handler(BaseHTTPRequestHandler):
             if route.path == '/api/state':
                 self.json(self.server.state())
             elif route.path == '/api/reader/catalog':
-                self.json({'archives':self.server.reader.catalogue()})
+                self.json({'archives':self.server.reader.catalogue(query.get('refresh')=='1'),'warnings':self.server.reader.discovery_warnings})
             elif route.path in ('/api/reader/overview','/api/reader/calendar','/api/reader/messages'):
                 self.json(self.server.reader.query(query.get('archive',''),route.path.rsplit('/',1)[-1],query))
             elif route.path == '/api/reader/asset':

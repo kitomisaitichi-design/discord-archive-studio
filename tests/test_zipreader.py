@@ -20,11 +20,11 @@ class ReaderTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(); self.root = Path(self.temp.name)
         self.store = Store(self.root/'Data')
         self.store.catalog([{'id':SID,'name':'Fixture'}],[{'id':CID,'name':'general','type':0}],SID)
-        self.exporter = Exporter(self.store); self.reader = ZipReader(self.store)
+        self.exporter = Exporter(self.store); self.reader = ZipReader(self.store,scan_parent=False)
     def tearDown(self): self.temp.cleanup()
     def publish(self, opts=None):
         result = self.exporter.publish(SID,options(opts),self.root/'Exports')
-        return result,self.reader.catalogue()[0]['id']
+        return result,next(e['id'] for e in self.reader.catalogue() if e['source']=='export')
     def test_native_reader_retained_for_text_only_and_no_canonical_reimport(self):
         self.store.upsert(CID,[message(9001,'unique searchable phrase')]); result,key=self.publish({'formats':['txt']})
         with zipfile.ZipFile(result['path']) as z:

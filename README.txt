@@ -1,4 +1,4 @@
-DISCORD ARCHIVE STUDIO 1.3.0 — WINDOWS x64
+DISCORD ARCHIVE STUDIO 1.3.1 — WINDOWS x64
 
 START
 The VBS first checks its own folder and immediate parent. If separated from the
@@ -221,6 +221,14 @@ executables, dependencies and user-supplied document instructions are not bundle
 The existing ChatGPT exporter/viewer files were not modified.
 
 ZIP MESSAGE EXPLORER (1.3)
+Saved library entries now appear automatically and reuse the working SQLite
+search/index directly, including saved messages outside a filtered ZIP view.
+Existing message ZIPs are discovered from the destination, app folder and parent
+tree through six levels. Inventory is cached for one minute; Refresh list/ZIP
+forces discovery. Private data/runtime/recovery folders, junctions, app release
+packages and online-only placeholders are skipped. Archives are read in place.
+Open outside ZIP remains optional for files outside those roots. No import or
+Discord history request is needed for existing indexed messages or local ZIPs.
 Choose ZIP reader in the left menu, or Read ZIP in History. Each archive opens
 in its own browser tab, with channel selection, calendar activity, hour jumps,
 search by words/author, and a continuous timeline. Scroll or use Earlier/Later.
@@ -255,3 +263,9 @@ automatically. Cached bytes are reused and deduplicated by their SHA-256.
 Pictures appear in the reader and saved HTML/JSON; Markdown/TXT retain their
 normal text format, with native metadata carrying the author association.
 Real CDN downloading and multi-day operation require live validation.
+
+QUEUE SELECTION AND MOVEMENT (1.3.1)
+Check all selects current editable tasks; Invert selection checks all except
+those already selected. Running/physically active tasks remain excluded. Drag
+a waiting row by its text or empty area as well as its left handle; buttons,
+checkboxes and links keep their normal clicks. Arrow controls remain available.

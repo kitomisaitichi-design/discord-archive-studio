@@ -138,3 +138,6 @@ themes, profile-setting persistence, the main ZIP catalogue, file-chooser ZIP
 opening and repeat opening, and corrected double-refresh behavior. Reader and
 main-app browser error logs were empty at the inspected checkpoints. Proof:
 `outputs/zip-reader-1.3.0-proof.jpg` (synthetic conversations, not user data).
+
+1.3.1 correction: all 107 Python tests pass. New checks cover canonical-index reading without ZIP/import/network/index-build calls, calendar/hour/FTS/author/reply/bidirectional cursors, filtered ZIP versus full saved-library counts, automatic unrecorded ZIP discovery, depth-six/seven boundaries, cached/forced scans, path deduplication, destination changes and relocated folders. Actual isolated UI verified native library reading, day/hour jumps, Check all (seven editable tasks, running excluded), invert-all and invert-one, dragging from row text with durable order after refresh, fixed running row and Settings control clicks. Browser error logs were empty at the inspected checkpoints. A read-only check of the user's 24,069-message index returned an 80-message page in 87.88 ms and overview in 12.90 ms on this machine; these are a single measured local sample, not a large-history performance guarantee. No live queue was modified as a test.
+

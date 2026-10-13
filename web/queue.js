@@ -14,15 +14,17 @@ async function moveQueueTask(id,before){
 }
 for(const container of [$('queue-detail'),$('tray-jobs')]){
   container.addEventListener('pointerdown',event=>{
-    const handle=event.target.closest('.drag-handle'),row=handle?.closest('[data-queue-job]');
+    const handle=event.target.closest('.drag-handle'),row=event.target.closest('[data-queue-job]');
     if(!row||row.dataset.movable!=='true'||queueMovePending||event.button!==0)return;
-    event.preventDefault();handle.setPointerCapture(event.pointerId);
+    if(!handle&&event.target.closest('button,input,select,textarea,a,label,[contenteditable]'))return;
+    if(handle)event.preventDefault();row.setPointerCapture(event.pointerId);
     draggedJob=row.dataset.queueJob;queuePointer={id:draggedJob,x:event.clientX,y:event.clientY,moved:false,allowed:false,before:null,pointer:event.pointerId};
   });
 }
 document.addEventListener('pointermove',event=>{
   const gesture=queuePointer;if(!gesture||event.pointerId!==gesture.pointer)return;
   if(!gesture.moved&&Math.hypot(event.clientX-gesture.x,event.clientY-gesture.y)<5)return;
+  event.preventDefault();
   gesture.moved=true;document.body.classList.add('queue-dragging');
   document.querySelectorAll('[data-queue-job]').forEach(row=>row.classList.toggle('dragging',row.dataset.queueJob===draggedJob));
   document.querySelectorAll('.drop-before,.drop-after').forEach(e=>e.classList.remove('drop-before','drop-after'));

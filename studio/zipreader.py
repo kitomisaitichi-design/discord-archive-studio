@@ -11,9 +11,11 @@ import shutil
 import sqlite3
 import tempfile
 import threading
+import time
 import zipfile
 from .importing import parse_json, parse_txt, DceHTML, synthetic
 from .store import packed
+from . import reader_library
 
 
 MAX_ENTRY = 128 * 1024 * 1024
@@ -81,23 +83,88 @@ def parse_studio_text(text, cid, name):
 
 
 class ZipReader:
-    def __init__(self, store):
+    def __init__(self, store, app_root=None, scan_parent=True):
         self.store = store
         self.root = store.root / 'reader-cache'
         self.root.mkdir(exist_ok=True)
         self.lock = threading.RLock()
         self.known = {}
+        self.app_root = Path(app_root) if app_root else store.root.parent
+        self.scan_parent = scan_parent
+        self.discovery = []
+        self.discovery_roots = None
+        self.discovery_until = 0
+        self.discovery_warnings = []
 
-    def catalogue(self):
+    def discover(self, refresh=False):
+        app=self.app_root
+        roots=[Path(self.store.setting('destination',str(self.store.root.parent/'Exports'))).expanduser(),app]
+        if self.scan_parent:roots.append(app.parent)
+        signature=tuple(os.path.normcase(str(p.resolve())) for p in roots)
+        with self.lock:
+            if not refresh and signature==self.discovery_roots and time.monotonic()<self.discovery_until:
+                return list(self.discovery)
+            found,seen,warnings=[],set(),[]
+            skip={'data','runtime','.git','.work','recovery','logs','__pycache__','node_modules','reader-cache','reader-archives'}
+            visited=0
+            def scan_error(error):warnings.append('Folder unavailable: '+str(error.filename))
+            for root in roots:
+                if not root.is_dir():continue
+                for base,dirs,files in os.walk(root,followlinks=False,onerror=scan_error):
+                    path=Path(base);normalized=os.path.normcase(str(path.resolve()))
+                    if normalized in seen:dirs[:]=[];continue
+                    seen.add(normalized);visited+=1
+                    if visited>5000:
+                        warnings.append('Discovery reached its 5,000-folder limit.');dirs[:]=[];break
+                    depth=len(path.relative_to(root).parts)
+                    dirs[:]=sorted(d for d in dirs if depth<6 and d.casefold() not in skip and not (path/d).is_symlink() and not getattr(path/d,'is_junction',lambda:False)())
+                    for name in sorted(files):
+                        if not name.lower().endswith('.zip') or re.match(r'Discord-Archive-Studio-v\d',name,re.I):continue
+                        candidate=path/name
+                        if candidate.is_symlink():continue
+                        try:
+                            if getattr(candidate.stat(),'st_file_attributes',0)&(0x1000|0x40000|0x400000):
+                                warnings.append('Online-only ZIP skipped until made available locally: '+name);continue
+                            title=None
+                            with zipfile.ZipFile(candidate) as archive:
+                                names=archive.namelist()
+                                if len(names)>10000:continue
+                                if 'manifest.json' in names and archive.getinfo('manifest.json').file_size<=262144:
+                                    manifest=json.loads(archive.read('manifest.json'))
+                                    if isinstance(manifest,dict) and str(manifest.get('schema','')).startswith('discord-archive-studio/'):
+                                        title=manifest.get('server_name') or name
+                                if not title:
+                                    for entry in archive.infolist():
+                                        if entry.filename.lower().endswith(('.json','.html','.htm','.md','.txt')) and entry.file_size<=MAX_ENTRY:
+                                            with archive.open(entry) as source:prefix=source.read(65536)
+                                            if re.search(rb'"messages"\s*:\s*\[',prefix) and b'"channel"' in prefix:
+                                                title=name;break
+                                            if b'chatlog__message-container' in prefix or re.search(rb'<article\s+id="m\d+',prefix) or re.search(rb'^(?:### |\[).*?\xc2\xb7 \d{4}-\d\d-\d\d',prefix,re.M) or re.search(rb'^\[\d{1,2}/\d{1,2}/\d{4} .*?[AP]M\]',prefix,re.M):
+                                                title=name;break
+                            if title:
+                                stat=candidate.stat();found.append({'path':str(candidate.resolve()),'name':str(title),'source':'discovered','size':stat.st_size,'updated':stat.st_mtime,'folder':str(path)})
+                            if len(found)>=1000:break
+                        except (OSError,ValueError,zipfile.BadZipFile,RuntimeError):
+                            warnings.append('Not a readable message ZIP: '+name)
+                    if len(found)>=1000:break
+                if visited>5000 or len(found)>=1000:break
+            self.discovery,self.discovery_roots,self.discovery_until=found,signature,time.monotonic()+60
+            self.discovery_warnings=warnings[:10]
+            return list(found)
+
+    def catalogue(self, refresh=False):
         with self.store.db() as db:
             pubs = [dict(r) for r in db.execute('SELECT server_id,path,updated,size FROM publications')]
             names = {r['id']: r['name'] for r in db.execute('SELECT id,name FROM servers')}
         entries = [dict(p, name=names.get(p['server_id'], p['server_id']), source='export') for p in pubs]
         entries += self.store.setting('reader_archives', [])
+        entries += self.discover(refresh)
+        dedup={}
         for entry in entries:
             entry['id'] = hashlib.sha256(str(Path(entry['path']).resolve()).encode()).hexdigest()
             entry['available'] = Path(entry['path']).is_file()
-        return entries
+            dedup.setdefault(os.path.normcase(str(Path(entry['path']).resolve())),entry)
+        return reader_library.entries(self.store)+list(dedup.values())
 
     def upload(self, content, filename):
         if not filename.lower().endswith('.zip'):
@@ -261,6 +328,9 @@ class ZipReader:
             temp.unlink(missing_ok=True)
 
     def query(self, key, kind, query):
+        entry=next((e for e in reader_library.entries(self.store) if e['id']==key),None)
+        if entry:
+            return reader_library.query(self.store,entry,kind,query,AvatarsView(self.store))
         path, generation, entry = self.index(key)
         with closing(sqlite3.connect(path)) as db:
             db.row_factory = sqlite3.Row
@@ -310,9 +380,20 @@ class ZipReader:
             return {'generation':generation,'messages':messages,'total':total,'first':first,'last':last,'before':before,'after':after}
 
     def asset(self, key, asset_id):
+        if any(e['id']==key for e in reader_library.entries(self.store)):
+            return reader_library.asset(self.store,asset_id)
         if not re.fullmatch('[a-f0-9]{64}', str(asset_id)): raise ValueError('Invalid saved asset.')
         path, _, _ = self.index(key)
         with closing(sqlite3.connect(path)) as db:
             row = db.execute('SELECT kind,data FROM assets WHERE id=?',(asset_id,)).fetchone()
         if not row: raise ValueError('This file was not included in the ZIP.')
         return row
+
+
+class AvatarsView:
+    """Read cache metadata without resetting any active download task."""
+    def __init__(self,store):self.store=store
+    def cached(self):
+        with self.store.db() as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE name='avatars'").fetchone():return {}
+            return {r['key']:dict(r) for r in db.execute('SELECT * FROM avatars') if (self.store.root/'avatars'/r['hash']).is_file()}
