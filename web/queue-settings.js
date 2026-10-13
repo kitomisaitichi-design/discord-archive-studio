@@ -4,7 +4,7 @@ const queueFields=[
  ['batch_messages','Messages per batch','number',100,100000],['cooldown_minutes','Rest between batches (minutes)','number',1,1440],
  ['page_delay','Seconds between requests','number',1,60],['timing_variation','Extra timing variation (%)','number',0,100],
  ['formats','Export formats','formats'],['include_attachments','Include attachment metadata','checkbox'],['download_media','Include manually saved files in ZIP','checkbox'],
- ['reactions','Include reactions','checkbox'],['edits','Include edit timestamps','checkbox'],['role_colors','Preserve available role colors','checkbox'],
+ ['include_avatars','Cache and include profile pictures','checkbox'],['reactions','Include reactions','checkbox'],['edits','Include edit timestamps','checkbox'],['role_colors','Preserve available role colors','checkbox'],
  ['exclude_bots','Exclude bot messages','checkbox'],['split_count','Split at this message count','number',1,100000],['split_mb','Split at estimated JSON size (MB, 0 = off)','number',0,1000],
  ['max_media_mb','ZIP attachment cap (MB; videos still capped at 10)','number',1,100],['start','From date','date'],['end','Through date','date'],
  ['people','Only these user IDs (comma separated)','text'],['archived_threads','Discover archived threads','checkbox'],

@@ -33,12 +33,26 @@ class LocalHTTPTests(unittest.TestCase):
         with self.browser.open(self.url+'/') as response:
             self.assertIn('SameSite=Strict',response.headers['Set-Cookie'])
             self.assertIn(b'Keep the conversation.',response.read())
-        for resource in ('app.js','style.css','server-picker.js','queue.js','queue-settings.js','people.js'):
+        for resource in ('app.js','style.css','server-picker.js','queue.js','queue-settings.js','people.js','archives.js','reader.js','reader.css'):
             with self.browser.open(self.url+'/'+resource) as response:self.assertGreater(len(response.read()),100)
         with self.browser.open(self.url+'/api/state') as response:
             self.assertNotIn('token',json.load(response)['connection'])
         with self.browser.open(self.url+'/api/people') as response:self.assertEqual(json.load(response)['contacts'],[])
         with self.browser.open(self.url+'/api/preview?channel=1') as response:self.assertEqual(json.load(response)['messages'],[])
+
+    def test_reader_tab_cookie_native_archive_routes_upload_and_asset_guard(self):
+        from test_studio import SID,CID,message
+        from studio.exporting import options
+        self.server.store.catalog([{'id':SID,'name':'Fixture'}],[{'id':CID,'name':'general'}],SID)
+        self.server.store.upsert(CID,[message(9001,'Local reader route')])
+        result=self.server.worker.exporter.publish(SID,options(None),self.server.worker.destination())
+        with self.browser.open(self.url+'/reader.html') as response:self.assertIn(b'Message explorer',response.read())
+        with self.browser.open(self.url+'/api/reader/catalog') as response:key=json.load(response)['archives'][0]['id']
+        with self.browser.open(self.url+'/api/reader/overview?archive='+key) as response:self.assertEqual(json.load(response)['channels'][0]['messages'],1)
+        with self.browser.open(self.url+'/api/reader/messages?archive='+key+'&channel='+CID) as response:self.assertEqual(json.load(response)['messages'][0]['content'],'Local reader route')
+        with self.assertRaises(HTTPError):self.browser.open(self.url+'/api/reader/asset?archive='+key+'&id=../../credentials')
+        with self.assertRaises(HTTPError):self.post('avatars/select',{'channels':[]})
+        with self.post('avatars/select',{'channels':[CID]}) as response:self.assertEqual(json.load(response)['queued'],0)
 
     def test_bulk_schedule_endpoint_remove_repeat_restore_and_owner_guard(self):
         self.browser.open(self.url+'/').close()

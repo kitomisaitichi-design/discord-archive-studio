@@ -137,6 +137,7 @@ class Store:
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             pending = {r['attachment_id']:r['max_bytes'] for r in db.execute("SELECT * FROM media_requests WHERE status IN ('queued','running')")}
+            avatar_count = db.execute("SELECT count(*) FROM avatar_tasks WHERE status IN ('queued','running')").fetchone()[0] if db.execute("SELECT 1 FROM sqlite_master WHERE name='avatar_tasks'").fetchone() else 0
             added = skipped = 0
             for selection in selections:
                 mid, aid = valid_id(selection['message_id']), valid_id(selection['attachment_id'])
@@ -150,7 +151,7 @@ class Store:
                     raise ValueError('Selected attachment is not part of this saved message.')
                 maximum = media_limit(attachment,cap_mb)
                 reason = media_reason(attachment,maximum)
-                if not reason and (len(pending)>=50 or sum(pending.values())+maximum>100000000):
+                if not reason and (len(pending)+avatar_count>=50 or sum(pending.values())+avatar_count*1000000+maximum>100000000):
                     raise ValueError('Pending downloads are capped at 100 MB and 50 files. Finish or cancel some selections first.')
                 status = 'skipped' if reason else 'queued'
                 db.execute('INSERT OR REPLACE INTO media_requests VALUES(?,?,?,?,?,0,?,?)',(aid,mid,row['channel_id'],status,maximum,reason or 'Selected manually; waiting until text exports finish.',time.time()))

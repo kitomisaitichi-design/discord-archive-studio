@@ -1,4 +1,4 @@
-DISCORD ARCHIVE STUDIO 1.2.0 — WINDOWS x64
+DISCORD ARCHIVE STUDIO 1.3.0 — WINDOWS x64
 
 START
 The VBS first checks its own folder and immediate parent. If separated from the
@@ -219,3 +219,39 @@ https://github.com/JohnSalchichonGH/discord-log-parser
 These were inspected for architecture and input conventions. Their source,
 executables, dependencies and user-supplied document instructions are not bundled.
 The existing ChatGPT exporter/viewer files were not modified.
+
+ZIP MESSAGE EXPLORER (1.3)
+Choose ZIP reader in the left menu, or Read ZIP in History. Each archive opens
+in its own browser tab, with channel selection, calendar activity, hour jumps,
+search by words/author, and a continuous timeline. Scroll or use Earlier/Later.
+Dates use UTC. Reading indexes saved files locally; it never fetches Discord
+history. The timeline renders at most 240 messages, loading 80 at a time.
+Use Open ZIP for existing exports (upload limit 128 MB); current server ZIPs
+open directly from disk. Reader limits: 10,000 entries, 128 MB per text part,
+512 MB total text, 100 MB cached files, 10 MB per included file. Unavailable
+or oversized files retain their message metadata. ZIPs remain unchanged.
+JSON is preferred. New text/HTML-only exports include native reader metadata;
+when JSON is selected it is reused, rather than written twice. Older HTML/TXT
+have the metadata their formats preserve. Archived scripts are never executed.
+Refresh ZIP loads new saved batches; returning to the tab checks for changes
+and offers an update without interrupting the conversation. Reader choices
+and your theme are remembered in the browser. Reader indexes and opened ZIPs
+live under Data/reader-cache and Data/reader-archives, separate from the working
+message database; opening one does not re-import it into your main library.
+
+OPTIONAL PROFILE PICTURES
+Enable Cache and include profile pictures in Export's advanced settings, or
+in the full queue editor, to queue captured authors after message work. The
+choice saves with your settings; default is off. Library also offers Queue
+profile pictures for its channel/server filters or all saved chats, with
+explicit retries. Enable inclusion and Update ZIP from saved data to embed
+already cached pictures in existing exports. Text history is not re-fetched.
+Pictures use captured user ID plus avatar hash, at 128px WebP; previous captured
+hashes remain separate. No extra user-profile endpoint is requested. No avatar
+hash means initials. They share the existing 50-file/100 MB pending reservation
+cap and each is capped at 1 MB. Deferred authors are reported by the Library
+action; queue again when earlier downloads finish. Failures are not retried
+automatically. Cached bytes are reused and deduplicated by their SHA-256.
+Pictures appear in the reader and saved HTML/JSON; Markdown/TXT retain their
+normal text format, with native metadata carrying the author association.
+Real CDN downloading and multi-day operation require live validation.

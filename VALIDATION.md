@@ -118,3 +118,23 @@ credentials, databases, private samples, development backups and caches were
 excluded. The clean release UI opened, empty Library refresh passed, and its
 browser console had no errors. These checks do not imply live extension capture
 or a real TLS handshake was tested in the packaged process.
+
+1.3 reader validation: regression tests cover native metadata for text-only ZIPs,
+JSON reuse, format fallback, per-archive isolation, repeat-open deduplication,
+date/hour indexing, FTS search, bounded bidirectional paging, changed-ZIP cache
+invalidation, Windows replacement, unsafe original/normalized paths, empty
+channels, avatar hash changes, deduplicated bytes, raster-only assets, offline
+profile rendering, opt-in defaults, caps, and text priority. HTTP checks cover
+reader-tab session establishment, local routes and invalid asset identifiers.
+The UI fixture contains synthetic messages and a generated test raster; it
+does not run a Discord connection or export worker. Real CDN downloads, live
+extension capture and multi-day queue operation remain unverified.
+
+All 103 Python tests pass, along with connector simulation and all UI script
+syntax checks. Actual isolated browser checks covered calendar/day selection,
+hour jumps, empty search/channel, 80-message paging with a 240-node ceiling,
+scroll-to-load, saved search/day/channel after refresh, readable light/midnight
+themes, profile-setting persistence, the main ZIP catalogue, file-chooser ZIP
+opening and repeat opening, and corrected double-refresh behavior. Reader and
+main-app browser error logs were empty at the inspected checkpoints. Proof:
+`outputs/zip-reader-1.3.0-proof.jpg` (synthetic conversations, not user data).

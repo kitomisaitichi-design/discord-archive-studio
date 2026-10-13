@@ -1,5 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
+const avatarSetting=document.createElement('label');avatarSetting.className='switch-row';avatarSetting.innerHTML='<span>Cache and include profile pictures <small class="hint">Optional · after text · 1 MB each</small></span><input id="include-avatars" type="checkbox">';$('download-media').closest('label').after(avatarSetting);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const number = value => Number(value || 0).toLocaleString();
 let state = null, currentPage = localStorage.getItem('studio.page') || 'export';
@@ -66,6 +67,7 @@ function showPage(page) {
   if(page==='library') searchLibrary();
   if(page==='settings') loadUsers();
   if(page==='people'&&typeof loadPeople==='function')loadPeople();
+  if(page==='archives'&&typeof loadArchiveCatalogue==='function')loadArchiveCatalogue();
 }
 function currentChannels() { return state?.channels.filter(c=>c.server_id===selectedServer) || []; }
 function replaceSelect(element, choices, value, empty) {
@@ -109,7 +111,7 @@ function updateLibraryChannels() {
 }
 function readOptions() {
   return {formats:Array.from(document.querySelectorAll('input[name=format]:checked'),x=>x.value),
-    include_attachments:$('include-attachments').checked,download_media:$('download-media').checked,reactions:$('include-reactions').checked,
+    include_avatars:$('include-avatars').checked,include_attachments:$('include-attachments').checked,download_media:$('download-media').checked,reactions:$('include-reactions').checked,
     edits:$('include-edits').checked,role_colors:$('role-colors').checked,exclude_bots:$('exclude-bots').checked,
     split_count:Number($('split-count').value),split_mb:Number($('split-mb').value),max_media_mb:Number($('max-media').value),
     batch_messages:Number($('batch-messages').value),cooldown_minutes:Number($('batch-cooldown').value),page_delay:Number($('page-delay').value),timing_variation:Number($('timing-variation').value),
@@ -117,7 +119,7 @@ function readOptions() {
     archived_threads:$('include-archived').checked,full_rescan:$('full-rescan').checked,recheck_edits:$('recheck-edits').checked,_use_queue_defaults:$('use-future-defaults')?.checked!==false};
 }
 function loadOptions(opts) {
-  const mappings={include_attachments:'include-attachments',download_media:'download-media',reactions:'include-reactions',edits:'include-edits',
+  const mappings={include_avatars:'include-avatars',include_attachments:'include-attachments',download_media:'download-media',reactions:'include-reactions',edits:'include-edits',
     role_colors:'role-colors',exclude_bots:'exclude-bots',split_count:'split-count',split_mb:'split-mb',max_media_mb:'max-media',
     batch_messages:'batch-messages',cooldown_minutes:'batch-cooldown',page_delay:'page-delay',timing_variation:'timing-variation',start:'date-start',end:'date-end',full_rescan:'full-rescan',recheck_edits:'recheck-edits'};
   for(const [key,id] of Object.entries(mappings)) { if(opts[key]===undefined)continue;const el=$(id);if(el.tagName==='SELECT'&&!Array.from(el.options).some(o=>o.value===String(opts[key]))){const o=document.createElement('option');o.value=String(opts[key]);o.textContent=key==='cooldown_minutes'?duration(Number(opts[key]))+' · custom':number(opts[key])+' · custom';el.add(o);}if(el.type==='checkbox')el.checked=opts[key];else el.value=opts[key]; }
@@ -170,7 +172,7 @@ function renderQueue() {
       const id=s.scope.split(':')[1], name=s.scope.startsWith('server:')?state.servers.find(x=>x.id===id)?.name:state.channels.find(x=>x.id===id)?.name;
       return `<div class="schedule-item"><div><strong>${s.scope.startsWith('channel:')?'# ':''}${esc(name||id)}</strong><small>${s.mode==='adaptive'?'Adaptive · seven-day sample':duration(s.minutes)}${s.options.inherited?' · server default':''}</small></div><div>${s.enabled?'Enabled':'Disabled'}<small>${s.enabled?'Next: '+esc(new Date(s.next_run*1000).toLocaleString()):'Paused'}</small></div></div>`;
     }).join(''):'<p class="hint">No schedules enabled. Configure one per server or per selected channel.</p>';
-    $('publication-list').innerHTML=state.publications.length?state.publications.map(p=>`<div class="publication-item"><div><strong>${esc(state.servers.find(s=>s.id===p.server_id)?.name||p.server_id)}</strong><small>${esc(p.path)}</small></div><div>${(p.size/1048576).toFixed(1)} MB<small>${esc(new Date(p.updated*1000).toLocaleString())}</small></div></div>`).join(''):'<p class="hint">No current ZIPs have been published yet.</p>';
+    $('publication-list').innerHTML=state.publications.length?state.publications.map(p=>`<div class="publication-item"><div><strong>${esc(state.servers.find(s=>s.id===p.server_id)?.name||p.server_id)}</strong><small>${esc(p.path)}</small><a href="/reader.html?archive=${esc(p.reader_id)}" target="_blank" rel="noopener">Read ZIP ↗</a></div><div>${(p.size/1048576).toFixed(1)} MB<small>${esc(new Date(p.updated*1000).toLocaleString())}</small></div></div>`).join(''):'<p class="hint">No current ZIPs have been published yet.</p>';
     queueSignature=signature;
     [$('tray-jobs'),$('queue-detail')].forEach((e,i)=>e.scrollTop=scrolls[i]);
   }
@@ -259,7 +261,8 @@ function messageHTML(m, local, small=false) {
   messageMap.set(m.id,m);
   const author=m.author?.global_name||m.author?.nickname||m.author?.username||m.author?.name||'Unknown';
   const initial=Array.from(author).slice(0,2).join('').toUpperCase();
-  return `<article class="message" data-message-id="${esc(m.id)}"><div class="avatar">${esc(initial)}</div><div class="message-body"><div class="message-header"><span class="message-author">${esc(author)}</span><time class="message-time">${esc(new Date(m.timestamp).toLocaleString())}${m.edited_timestamp?' · edited':''}</time>${m.channel_name?`<span class="message-channel"># ${esc(m.channel_name)}</span>`:''}</div>${m.message_reference?.message_id?`<button class="message-reply subtle" data-reply="${esc(m.message_reference.message_id)}">↩ Reply to message ${esc(m.message_reference.message_id)}</button>`:''}<div class="message-content">${contentHTML(m.content||'')}</div>${small?previewMediaHTML(m):(m.attachments||[]).map(a=>attachmentHTML(a,local,m.id)).join('')}${small?'':(m.embeds||[]).map(e=>`<div class="embed"><strong>${esc(e.title||'')}</strong><div>${esc(e.description||'')}</div></div>`).join('')}${m.reactions?.length?`<div class="reactions">${m.reactions.map(r=>`<span class="reaction">${esc(r.emoji?.name||'?')} ${number(r.count)}</span>`).join('')}</div>`:''}<div class="message-actions"><button data-copy-message="${esc(m.id)}">Copy text</button><button data-details="${esc(m.id)}">Details · ${esc(m.author?.id)}</button></div></div></article>`;
+  const avatar=/^\/avatar\/[a-f0-9]{64}$/.test(m._avatar_url||'')?`<img src="${esc(m._avatar_url)}" alt="${esc(initial)}" loading="lazy" width="40" height="40">`:esc(initial);
+  return `<article class="message" data-message-id="${esc(m.id)}"><div class="avatar">${avatar}</div><div class="message-body"><div class="message-header"><span class="message-author">${esc(author)}</span><time class="message-time">${esc(new Date(m.timestamp).toLocaleString())}${m.edited_timestamp?' · edited':''}</time>${m.channel_name?`<span class="message-channel"># ${esc(m.channel_name)}</span>`:''}</div>${m.message_reference?.message_id?`<button class="message-reply subtle" data-reply="${esc(m.message_reference.message_id)}">↩ Reply to message ${esc(m.message_reference.message_id)}</button>`:''}<div class="message-content">${contentHTML(m.content||'')}</div>${small?previewMediaHTML(m):(m.attachments||[]).map(a=>attachmentHTML(a,local,m.id)).join('')}${small?'':(m.embeds||[]).map(e=>`<div class="embed"><strong>${esc(e.title||'')}</strong><div>${esc(e.description||'')}</div></div>`).join('')}${m.reactions?.length?`<div class="reactions">${m.reactions.map(r=>`<span class="reaction">${esc(r.emoji?.name||'?')} ${number(r.count)}</span>`).join('')}</div>`:''}<div class="message-actions"><button data-copy-message="${esc(m.id)}">Copy text</button><button data-details="${esc(m.id)}">Details · ${esc(m.author?.id)}</button></div></div></article>`;
 }
 async function searchLibrary() {
   if(!state)return;

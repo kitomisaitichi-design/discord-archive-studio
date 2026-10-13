@@ -19,6 +19,7 @@ from .importing import import_data
 from .store import packed, valid_id
 from .launching import library_identity
 from .people import People
+from .zipreader import ZipReader
 
 
 class Server(ThreadingHTTPServer):
@@ -41,6 +42,7 @@ class Server(ThreadingHTTPServer):
         self.window_state = {}
         self.native_window_enabled = False
         self.people = People(store)
+        self.reader = ZipReader(store)
 
     def state(self):
         destination = self.worker.destination()
@@ -54,6 +56,8 @@ class Server(ThreadingHTTPServer):
             channel['accessible'] = bool(self.connection.account and inventory.get('owner') == self.connection.account['id'] and channel['id'] in inventory.get('ids', []))
         with self.store.db() as db:
             pubs = [dict(r) for r in db.execute('SELECT server_id,path,updated,size FROM publications')]
+            for pub in pubs:
+                pub['reader_id'] = hashlib.sha256(str(Path(pub['path']).resolve()).encode()).hexdigest()
             presets = [dict(r, options=json.loads(r['options'])) for r in db.execute('SELECT * FROM presets ORDER BY name')]
         owner=self.connection.account['id'] if self.connection.account else self.store.setting('account_id','local')
         return {'version': self.store.version, 'connection': self.connection.status(), 'servers': self.store.servers(),
@@ -66,6 +70,7 @@ class Server(ThreadingHTTPServer):
                 'destination': destination, 'cooldown_until': self.store.setting('cooldown_until', 0),
                 'defaults': DEFAULT_OPTIONS, 'presets': presets, 'demo': self.store.setting('demo', False),
                 'media_tasks': self.store.media_tasks(), 'auto_connect':self.store.setting('auto_connect',True),
+                'avatar_tasks':self.worker.exporter.avatars.tasks(),
                 'worker_error': self.store.setting('worker_error', '')}
 
 
@@ -124,10 +129,10 @@ class Handler(BaseHTTPRequestHandler):
             route = urlparse(self.path)
             query = {k: v[-1] for k, v in parse_qs(route.query).items()}
             if route.path == '/api/health':
-                self.json({'app': 'Discord Archive Studio', 'version': '1.2.0','library_id':library_identity(self.server.store.root)})
+                self.json({'app': 'Discord Archive Studio', 'version': '1.3.0','library_id':library_identity(self.server.store.root)})
                 return
-            if route.path in ('/', '/index.html'):
-                payload = (self.server.web / 'index.html').read_bytes()
+            if route.path in ('/', '/index.html', '/reader.html'):
+                payload = (self.server.web / ('reader.html' if route.path == '/reader.html' else 'index.html')).read_bytes()
                 self.send_headers(kind='text/html; charset=utf-8', extra={'Set-Cookie': self.server.cookie_name+'='+self.server.session+'; HttpOnly; SameSite=Strict; Path=/'}, length=len(payload))
                 self.wfile.write(payload)
                 return
@@ -136,6 +141,22 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if route.path == '/api/state':
                 self.json(self.server.state())
+            elif route.path == '/api/reader/catalog':
+                self.json({'archives':self.server.reader.catalogue()})
+            elif route.path in ('/api/reader/overview','/api/reader/calendar','/api/reader/messages'):
+                self.json(self.server.reader.query(query.get('archive',''),route.path.rsplit('/',1)[-1],query))
+            elif route.path == '/api/reader/asset':
+                kind, payload = self.server.reader.asset(query.get('archive',''),query.get('id',''))
+                self.send_headers(kind=kind,length=len(payload),extra={'Content-Disposition':'attachment'} if kind=='application/octet-stream' else None)
+                self.wfile.write(payload)
+            elif re.fullmatch(r'/avatar/[a-f0-9]{64}',route.path):
+                digest = route.path.rsplit('/',1)[-1]
+                with self.server.store.db() as db:
+                    row = db.execute('SELECT kind FROM avatars WHERE hash=? LIMIT 1',(digest,)).fetchone()
+                path = self.server.store.root/'avatars'/digest
+                if not row or not path.is_file(): raise ValueError('Profile picture is not saved.')
+                payload = path.read_bytes()
+                self.send_headers(kind=row['kind'],length=len(payload)); self.wfile.write(payload)
             elif route.path == '/api/search':
                 result = self.server.store.search(query.get('q', ''), query.get('channel'), query.get('server'), query.get('person'), query.get('start'), query.get('end'), query.get('offset', 0), query.get('limit', 80))
                 attachment_ids = {str(a.get('id')) for m in result['messages'] for a in m.get('attachments', [])}
@@ -151,6 +172,11 @@ class Handler(BaseHTTPRequestHandler):
                                 if row and not media_reason(a,media_limit(a,100),dict(row)):
                                     local[aid]='/media/'+row['hash']
                 result['media'] = local
+                from .avatars import avatar_key
+                cached = self.server.worker.exporter.avatars.cached()
+                for message in result['messages']:
+                    key = avatar_key(message.get('author',{}))
+                    if key and key[0] in cached: message['_avatar_url'] = '/avatar/'+cached[key[0]]['hash']
                 self.json(result)
             elif route.path == '/api/preview':
                 self.json(self.server.store.preview(query.get('channel',''),query.get('before'),query.get('limit',50)))
@@ -184,7 +210,7 @@ class Handler(BaseHTTPRequestHandler):
                 with path.open('rb') as source:
                     while block := source.read(256*1024):
                         self.wfile.write(block)
-            elif route.path in ('/app.js', '/style.css', '/server-picker.js', '/queue.js', '/queue-settings.js', '/people.js'):
+            elif route.path in ('/app.js', '/style.css', '/server-picker.js', '/queue.js', '/queue-settings.js', '/people.js', '/archives.js', '/reader.js', '/reader.css'):
                 path = self.server.web / route.path.lstrip('/')
                 payload = path.read_bytes()
                 self.send_headers(kind='text/javascript; charset=utf-8' if path.suffix=='.js' else 'text/css; charset=utf-8', length=len(payload))
@@ -238,6 +264,9 @@ class Handler(BaseHTTPRequestHandler):
             if size < 0 or size > 128*1024*1024:
                 raise ValueError('Request exceeds the 128 MB input limit.')
             content = self.rfile.read(size)
+            if route.path == '/api/reader/open':
+                filename = parse_qs(route.query).get('name',['archive.zip'])[-1]
+                self.json(self.server.reader.upload(content,filename)); return
             if route.path == '/api/import':
                 filename = parse_qs(route.query).get('name', ['import.json'])[-1]
                 with self.server.mutation_lock:
@@ -350,6 +379,13 @@ class Handler(BaseHTTPRequestHandler):
             return result
         elif path == '/api/media/cancel':
             store.update_media(valid_id(data['id']),status='cancelled',detail='Cancelled manually; existing cached files retained.')
+            worker.signal()
+        elif path == '/api/avatars/select':
+            result = worker.exporter.avatars.queue(data.get('channels'),retry=True)
+            worker.signal(); return result
+        elif path == '/api/avatars/cancel':
+            key = str(data.get('key',''))
+            worker.exporter.avatars.update(key,'cancelled','Cancelled; existing cached pictures retained.')
             worker.signal()
         elif path == '/api/control':
             if data['action'] == 'apply':

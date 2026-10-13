@@ -9,13 +9,14 @@ import time
 import zipfile
 from .store import fingerprint, packed
 from .discord import download, Interrupted, MediaTooLarge
+from .avatars import avatar_key
 
 
 FORMAT_ORDER = ('json','html','md','txt')
 DEFAULT_OPTIONS = {'formats': ['json', 'html'], 'download_media': True, 'include_attachments': True,
                    'reactions': True, 'edits': True, 'role_colors': True, 'split_count': 10000,
                    'split_mb': 0, 'exclude_bots': False, 'people': [], 'start': '', 'end': '',
-                   'batch_messages': 1000, 'cooldown_minutes': 5, 'page_delay': 2.5,
+                   'batch_messages': 1000, 'cooldown_minutes': 5, 'page_delay': 2.5, 'include_avatars': False,
                    'max_media_mb': 10, 'edit_lookback_days': 7, 'archived_threads': False, 'full_rescan': False, 'recheck_edits':False,'timing_variation':25}
 
 
@@ -71,8 +72,13 @@ def author_name(m):
     return author.get('global_name') or author.get('nickname') or author.get('username') or author.get('name') or 'Unknown'
 
 
-def normalized(message, opts, media, requests=None):
+def normalized(message, opts, media, requests=None, avatars=None):
     m = json.loads(packed(message))
+    m.get('author', {}).pop('avatar_local_path', None)
+    captured = avatar_key(m.get('author', {}))
+    saved_avatar = (avatars or {}).get(captured[0]) if captured else None
+    if opts.get('include_avatars') and saved_avatar:
+        m['author']['avatar_local_path'] = '../../avatars/'+saved_avatar['hash']
     if not opts['reactions']:
         m.pop('reactions', None)
     if not opts['edits']:
@@ -139,8 +145,10 @@ def render(messages, fmt, channel, opts):
         color = m.get('author', {}).get('role_color', 0) if opts['role_colors'] else 0
         color = '#%06x' % int(color) if isinstance(color, int) and 0 <= color <= 0xffffff else '#b6a4ff'
         embeds = ''.join('<aside><b>%s</b><p>%s</p></aside>' % (esc(e.get('title', '')), esc(e.get('description', ''))) for e in m.get('embeds', []))
-        cards.append('<article id="m%s"><header><b style="color:%s">%s</b><time>%s</time></header>%s<div class="content">%s</div>%s%s<footer>%s %s</footer></article>' %
-                     (esc(m['id'], quote=True), color, esc(author_name(m)), esc(m.get('timestamp', '')),
+        avatar = m.get('author', {}).get('avatar_local_path','')
+        picture = '<img class="pfp" width="40" height="40" src="%s" alt="" loading="lazy">' % esc(avatar,quote=True) if re.fullmatch(r'\.\./\.\./avatars/[a-f0-9]{64}',avatar) else ''
+        cards.append('<article id="m%s"><header>%s<b style="color:%s">%s</b><time>%s</time></header>%s<div class="content">%s</div>%s%s<footer>%s %s</footer></article>' %
+                     (esc(m['id'], quote=True), picture, color, esc(author_name(m)), esc(m.get('timestamp', '')),
                       '<small>↩ Reply to '+esc(str(reply))+'</small>' if reply else '', esc(m.get('content', '')), ''.join(attachments), embeds, reactions,
                       '· edited '+esc(m.get('edited_timestamp', '')) if m.get('edited_timestamp') else ''))
     return '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
@@ -151,6 +159,8 @@ def render(messages, fmt, channel, opts):
 class Exporter:
     def __init__(self, store):
         self.store = store
+        from .avatars import Avatars
+        self.avatars = Avatars(store)
 
     def download_selected(self, task, control):
         aid, cid = task['attachment_id'], task['channel_id']
@@ -215,10 +225,14 @@ class Exporter:
             media = {r['attachment_id']: dict(r) for r in db.execute('SELECT * FROM media')}
             requests = {r['attachment_id']:dict(r) for r in db.execute('SELECT * FROM media_requests')}
             previous = db.execute('SELECT * FROM publications WHERE server_id=?', (server_id,)).fetchone()
+        avatars = self.avatars.cached()
+        for channel in channels:
+            if channel['id'] in affected and views.get(channel['id'],opts).get('include_avatars'):
+                self.avatars.queue([channel['id']])
         media = {aid:dict(saved,size=max(saved['size'],(self.store.root/saved['relative_path']).stat().st_size)) for aid,saved in media.items() if (self.store.root/saved['relative_path']).is_file()}
-        view_keys = ('formats','download_media','include_attachments','max_media_mb','reactions','edits','role_colors','split_count','split_mb','exclude_bots','people','start','end')
+        view_keys = ('formats','download_media','include_attachments','include_avatars','max_media_mb','reactions','edits','role_colors','split_count','split_mb','exclude_bots','people','start','end')
         presentation = {c['id']:{k:views.get(c['id'],opts)[k] for k in view_keys} for c in channels}
-        digest = fingerprint({'server_name':server_name,'channels': [(c['id'], c['name'], c['generation'], c['history_done']) for c in channels], 'options': presentation})
+        digest = fingerprint({'reader_schema':1,'server_name':server_name,'channels': [(c['id'], c['name'], c['generation'], c['history_done']) for c in channels], 'options': presentation})
         target = destination / ('server_%s.zip' % server_id)
         if previous and previous['hash'] == digest and previous['path'] == str(target) and target.is_file():
             return {'path': str(target), 'unchanged': True, 'bytes': target.stat().st_size}
@@ -226,7 +240,7 @@ class Exporter:
         os.close(handle)
         temp = Path(name)
         try:
-            index, used_media = [], set()
+            index, used_media, used_avatars = [], set(), set()
             with zipfile.ZipFile(temp, 'w', zipfile.ZIP_DEFLATED, compresslevel=4) as archive:
                 archive.writestr('README.txt', 'Discord Archive Studio\nOpen index.html to browse channels. JSON preserves stable message IDs.\nCaptured data may be partial during a paced export. Deleted messages and unseen edits are not recoverable.\n')
                 for channel in channels:
@@ -235,6 +249,9 @@ class Exporter:
                     part, batch, size = 1, [], 0
                     def write_part():
                         base = 'channels/%s/%05d' % (channel['id'], part)
+                        # Reader data is local presentation metadata, independent of selected formats.
+                        if 'json' not in channel_opts['formats']:
+                            archive.writestr('reader/%s/%05d.json' % (channel['id'],part),render(batch,'json',channel,channel_opts))
                         for fmt in channel_opts['formats']:
                             ext = fmt
                             archive.writestr(base+'.'+ext, render(batch, fmt, channel, channel_opts))
@@ -244,7 +261,9 @@ class Exporter:
                             raise Interrupted('ZIP publication paused; previous ZIP remains intact.')
                         if not filtered(m, channel_opts):
                             continue
-                        normalized_message = normalized(m, channel_opts, media, requests)
+                        normalized_message = normalized(m, channel_opts, media, requests, avatars)
+                        if normalized_message.get('author',{}).get('avatar_local_path'):
+                            used_avatars.add(normalized_message['author']['avatar_local_path'][6:])
                         estimated = len(packed(normalized_message).encode('utf-8'))
                         if batch and (len(batch) >= channel_opts['split_count'] or (channel_opts['split_mb'] and size+estimated > channel_opts['split_mb']*1024*1024)):
                             write_part()
@@ -261,6 +280,8 @@ class Exporter:
                         archive.write(self.store.root / saved['relative_path'], saved['relative_path'])
                         written.add(saved['hash'])
                 manifest = {'schema': 'discord-archive-studio/1', 'server_id': server_id, 'server_name':server_name, 'content_hash': digest, 'channels': channels, 'files': index, 'options': presentation}
+                for relative in used_avatars:
+                    archive.write(self.store.root/relative,relative)
                 archive.writestr('manifest.json', packed(manifest))
                 links = ''.join('<li><a href="%s">%s — %s (%s messages)</a></li>' % (html.escape(i['file'], quote=True), html.escape(i['channel']), i['format'].upper(), i['messages']) for i in index)
                 archive.writestr('index.html', '<!doctype html><meta charset="utf-8"><title>'+html.escape(server_name)+'</title><style>body{font:16px system-ui;background:#0c1220;color:#eee;padding:32px}a{color:#b6a4ff}li{margin:12px}</style><h1>'+html.escape(server_name)+'</h1><ul>'+links+'</ul>')

@@ -378,6 +378,28 @@ class Worker:
             self.store.update_media(aid,status='failed',detail='Download failed: '+str(error)+'. Signed links may expire; rescan text and retry explicitly.')
         self.store.set_setting('media_next',time.time()+5)
 
+    def process_avatar(self):
+        if self.stop.is_set() or self.text_pending() or time.time()<self.store.setting('media_next',0): return
+        avatars = self.exporter.avatars
+        tasks = [t for t in avatars.tasks() if t['status']=='queued']
+        if not tasks: return
+        task = min(tasks,key=lambda t:t['updated']); key = task['key']
+        avatars.update(key,'running','Downloading selected profile picture…')
+        def control():
+            return not self.stop.is_set() and not self.text_pending() and any(t['key']==key and t['status']=='running' for t in avatars.tasks())
+        try:
+            avatars.fetch(task,control)
+            if not control(): raise Interrupted('Yielded to text work.')
+            for sid in avatars.servers(key):
+                self.exporter.publish(sid,options(None),self.destination(),control,selected_channels=[])
+            avatars.update(key,'completed','Saved locally; server ZIPs updated where pictures are enabled.')
+        except Interrupted:
+            if any(t['key']==key and t['status']=='running' for t in avatars.tasks()):
+                avatars.update(key,'queued','Yielded to text work; waiting.')
+        except Exception as error:
+            avatars.update(key,'failed','Profile-picture download or ZIP update failed: '+str(error)+'. Retry explicitly.')
+        self.store.set_setting('media_next',time.time()+varied_delay(5,25))
+
     def run(self):
         while not self.stop.is_set():
             try:
@@ -407,6 +429,7 @@ class Worker:
                             finally:
                                 self.store.release_job(job['id'])
                 self.process_media()
+                self.process_avatar()
             except Exception as error:
                 self.store.set_setting('worker_error', str(error))
             self.wake.wait(2)
