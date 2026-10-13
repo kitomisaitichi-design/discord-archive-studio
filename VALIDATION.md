@@ -1,5 +1,9 @@
 # Validation — 2026-10-13
 
+1.5.1 is a focused UI correction. The running Export details dialog reproduced 356-719 pixel checkboxes and horizontal overflow. Capture/Files/Pacing now retain the original inputs with 18-pixel checkboxes; desktop and 390-pixel dialog checks show no horizontal overflow. Offline browser checks cover tab/keyboard navigation, Escape/Done, changed settings restored after refresh, History search/empty results and completed-task expansion, named Library filters, 80-message local reading, aligned toolbar/transcript and absence of empty embeds. The existing rendering simulation and affected JavaScript syntax checks pass. No full Python suite or live Discord fetch was repeated for this UI change.
+
+The initial post-refresh preference observation occurred before initialization; the initialized state restored the edited values correctly. A narrow viewport coordinate click selected a different navigation item; keyboard activation reached the intended page and verified the same dialog at 390 pixels. Temporary viewport overrides were reset.
+
 1.5.0: all 136 Python tests pass, plus connector, buffered-reader/MIDI and state-coalescing simulations and syntax checks for every web script. New checks cover generation-cache reuse/invalidation, moved-channel counts, captured name history, explicit alias changes, exact versus surrounding-context jumps, mutable-response isolation and stable reading cursors under incoming messages.
 
 The 128-task, 60-update browser fixture reduced median/p95 synchronous rendering from 20.2/23.5 ms to 1.3/1.8 ms; next-frame latency changed from 36.6/43.4 ms to 6.2/6.6 ms. It retained the active row and focused button in all 60 updates. These are local fixture measurements, not a claim about network speed or every machine. The final harness closes its event stream to exclude an initial SSE connection snapshot from manually supplied progress states.

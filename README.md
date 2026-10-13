@@ -8,6 +8,7 @@ Download the **Portable ZIP** from [Releases](https://github.com/kitomisaitichi-
 
 ## What it does
 
+- Export details use readable Capture, Files and Pacing tabs. History groups searchable conversations by server or DMs and keeps completed task details expandable. Library aligns its search controls and transcript, resolves filter names and keeps message actions accessible on hover or keyboard focus.
 - Retained task rows, coalesced progress events, deferred hidden-page rendering and bounded local metadata caches keep updates responsive.
 - Ctrl+K search/navigation, named saved searches, removable filter chips, safe text highlighting, bookmarks, last-read restoration and jumps into surrounding saved conversation.
 - Captured-person drawers show saved name history and explicit identity links without enumerating server members.

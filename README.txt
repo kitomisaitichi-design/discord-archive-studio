@@ -1,4 +1,10 @@
-DISCORD ARCHIVE STUDIO 1.5.0 — WINDOWS x64
+DISCORD ARCHIVE STUDIO 1.5.1 — WINDOWS x64
+
+READABLE EXPORT DETAILS AND A CLEANER LIBRARY
+Export details separate Capture, Files and Pacing with aligned checkboxes and
+readable labels. History has searchable server/DM groups and expandable export
+activity. Library shows named filters, consistent avatars and quieter message
+actions; keyboard focus and touch keep those actions accessible.
 
 READING, SEARCH AND SMOOTHER UPDATES
 Queue progress retains task rows and focus. Hidden pages defer their rendering;

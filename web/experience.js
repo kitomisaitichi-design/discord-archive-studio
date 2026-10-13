@@ -39,7 +39,29 @@ const StudioExperience=(()=>{
   const names=reader?['search','author','attachment','type','start','end','phrase']:['search','server','channel','person','attachment','type','start','end','phrase'];
   const prefix=reader?'reader-':'library-';
   if(!reader){const filters=byId('page-library').querySelector('.library-filters'),drawer=document.createElement('details');drawer.className='library-filter-drawer';drawer.innerHTML='<summary>Filters · server, channel, person, files & dates</summary>';filters.before(drawer);drawer.append(filters);
-    const advanced=byId('advanced'),body=advanced.querySelector('.advanced-body'),advancedDialog=dialog('advanced-export-dialog','Export details','');advancedDialog.append(body);advanced.open=false;advanced.querySelector('summary span').textContent='Open settings';advanced.querySelector('summary').addEventListener('click',e=>{e.preventDefault();advancedDialog.showModal();});}
+    const advanced=byId('advanced'),body=advanced.querySelector('.advanced-body'),advancedDialog=dialog('advanced-export-dialog','Export details','');
+    advancedDialog.setAttribute('aria-label','Export details');
+    const tabs=document.createElement('div');tabs.className='export-settings-tabs';tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Export settings sections');
+    const groups=[['capture','Capture','Choose what appears in your exported files.'],['files','Files','Package your saved conversations and locally cached assets.'],['pacing','Pacing','Control the spacing between message requests.']];
+    const panels=groups.map(([key,title,description])=>{const panel=document.createElement('section');panel.id='export-section-'+key;panel.className='export-settings-section';panel.setAttribute('role','tabpanel');panel.setAttribute('aria-labelledby','export-tab-'+key);panel.innerHTML=`<h2>${title}</h2><p class="hint">${description}</p>`;const button=document.createElement('button');button.id='export-tab-'+key;button.type='button';button.textContent=title;button.setAttribute('role','tab');button.setAttribute('aria-controls',panel.id);tabs.append(button);return panel;});
+    const setTab=index=>{panels.forEach((panel,i)=>{panel.hidden=i!==index;const button=tabs.children[i];button.setAttribute('aria-selected',String(i===index));button.tabIndex=i===index?0:-1;});body.scrollTop=0;};
+    [...tabs.children].forEach((button,index)=>{button.onclick=()=>setTab(index);button.onkeydown=e=>{let next;if(e.key==='ArrowRight')next=(index+1)%groups.length;else if(e.key==='ArrowLeft')next=(index+groups.length-1)%groups.length;else if(e.key==='Home')next=0;else if(e.key==='End')next=groups.length-1;if(next!==undefined){e.preventDefault();setTab(next);tabs.children[next].focus();}};});
+    const move=(id,panel)=>{const input=byId(id),node=input.closest('.field')||input.closest('label');if(input.type==='checkbox'){const copy=document.createElement('span');copy.className='setting-copy';for(const child of [...node.childNodes])if(child!==input)copy.append(child);node.classList.add('export-option');node.replaceChildren(copy,input);}panel.append(node);};
+    for(const id of ['include-reactions','include-edits','role-colors','exclude-bots'])move(id,panels[0]);
+    const dates=document.createElement('div');dates.className='export-fields';panels[0].append(dates);for(const id of ['date-start','date-end'])move(id,dates);move('people-filter',panels[0]);
+    for(const id of ['recheck-edits','full-rescan'])move(id,panels[0]);
+    panels[0].insertAdjacentHTML('beforeend','<p class="export-settings-note">Filters apply to exported files. Your saved library keeps captured messages. Regular scans continue after the latest saved message; full-history rescans require an explicit export.</p>');
+    for(const id of ['include-attachments','download-media','include-avatars'])move(id,panels[1]);
+    const splitting=document.createElement('div');splitting.className='export-fields';panels[1].append(splitting);for(const id of ['split-count','split-mb'])move(id,splitting);move('max-media',panels[1]);
+    panels[1].insertAdjacentHTML('beforeend','<p class="export-settings-note">Attachments are downloaded only when you select them in Library. Text comes first; videos over 10 MB are skipped.</p>');
+    for(const id of ['page-delay','timing-variation'])move(id,panels[2]);
+    panels[2].insertAdjacentHTML('beforeend','<p class="export-settings-note">Choose batch size and batch rest in the export workspace. These options apply to new tasks; edit waiting tasks from Queue.</p>');
+    body.replaceChildren(...panels);advancedDialog.append(tabs,body);advancedDialog.insertAdjacentHTML('beforeend','<div class="export-settings-footer"><span>Changes are saved automatically</span><button data-close-experience class="primary">Done</button></div>');setTab(0);
+    advanced.open=false;advanced.querySelector('summary span').textContent='Open settings';advanced.querySelector('summary').addEventListener('click',e=>{e.preventDefault();advancedDialog.showModal();});
+    const historyTools=document.createElement('div');historyTools.className='history-tools';historyTools.innerHTML='<input id="history-search" type="search" aria-label="Search saved conversations" placeholder="Search a conversation or server…"><select id="history-server" aria-label="Conversation group"><option value="">All conversations</option></select><span id="history-filter-count" class="muted" role="status"></span>';byId('history-saved').before(historyTools);
+    for(const id of ['history-search','history-server'])byId(id).addEventListener('input',()=>{historySignature='';renderSavedHistory();});
+    byId('history-list').previousElementSibling.textContent='Export activity';
+  }
   function query(){return Object.fromEntries(names.map(name=>[name,name==='phrase'?byId(prefix+name).checked:byId(prefix+name).value]));}
   function scope(){return reader?'reader:'+key:'library';}
   function searches(){return read('studio.saved-searches',[]);}
@@ -54,6 +76,7 @@ const StudioExperience=(()=>{
   document.querySelector(reader?'.reader-tools':'.library-tools').after(toolRow);
   if(!reader){const utilities=dialog('library-utilities','Downloads & saved assets',''),panels=[...byId('page-library').querySelectorAll(':scope > details.panel')];for(const panel of panels)utilities.append(panel);const button=document.createElement('button');button.className='subtle';button.textContent='Downloads & assets';button.onclick=()=>utilities.showModal();toolRow.append(button);}
   const chips=document.createElement('div');chips.className='filter-chips';toolRow.after(chips);
+  if(!reader){const libraryTools=byId('page-library').querySelector('.library-tools');libraryTools.append(toolRow,chips);}
   const saveSearch=dialog('save-search-dialog','Save search','<form id="save-search-form"><div class="field"><label for="saved-search-name">Search name</label><input id="saved-search-name" maxlength="80" required placeholder="Give this search a name"></div><button class="primary" type="submit">Save locally</button></form>');
   byId('save-reading-search').onclick=()=>{byId('saved-search-name').value='';saveSearch.showModal();};
   byId('save-search-form').onsubmit=e=>{e.preventDefault();const name=byId('saved-search-name').value.trim();if(!name){byId('saved-search-name').setCustomValidity('Enter a search name.');byId('saved-search-name').reportValidity();return;}const rows=searches().filter(s=>!(s.scope===scope()&&s.name===name));rows.unshift({id:crypto.randomUUID(),scope:scope(),name,query:query()});put('studio.saved-searches',rows.slice(0,50));saveSearch.close();refreshTools();};
@@ -63,7 +86,8 @@ const StudioExperience=(()=>{
   function refreshTools(){
     const select=byId('saved-search-select'),chosen=select.value;
     select.innerHTML='<option value="">Saved searches…</option>'+searches().filter(s=>s.scope===scope()).map(s=>`<option value="${html(s.id)}">${html(s.name)}</option>`).join('');select.value=chosen;byId('remove-reading-search').disabled=!select.value;
-    chips.innerHTML=names.filter(n=>query()[n]).map(n=>`<button data-clear-filter="${n}" class="filter-chip">${html(n)}: ${html(n==='phrase'?'exact':query()[n])} <span aria-hidden="true">×</span></button>`).join('');
+    const values=query(),filterLabel=n=>n==='phrase'?'Exact phrase':n==='server'&&!reader?(state?.servers.find(s=>s.id===values[n])?.name||values[n]):n==='channel'&&!reader?(state?.channels.find(c=>c.id===values[n])?.name||values[n]):values[n];
+    chips.innerHTML=names.filter(n=>values[n]).map(n=>`<button data-clear-filter="${n}" class="filter-chip" aria-label="Remove ${html(n)} filter: ${html(filterLabel(n))}">${n==='channel'?'# ':['server','phrase'].includes(n)?'':html(n)+': '}${html(filterLabel(n))} <span aria-hidden="true">×</span></button>`).join('');
     decorate();fitReadingPane();
   }
   function fitReadingPane(){if(reader){requestAnimationFrame(()=>document.documentElement.style.setProperty('--reader-height',Math.max(220,innerHeight-byId('reader-timeline').getBoundingClientRect().top-60)+'px'));return;}if(currentPage!=='library')return;requestAnimationFrame(()=>{const box=byId('library-results'),tray=byId('queue-tray').getBoundingClientRect(),bottom=Math.min(innerHeight,tray.top>0?tray.top:innerHeight);document.documentElement.style.setProperty('--library-height',Math.max(180,bottom-box.getBoundingClientRect().top-64)+'px');});}

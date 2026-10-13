@@ -129,7 +129,7 @@ class Handler(BaseHTTPRequestHandler):
             route = urlparse(self.path)
             query = {k: v[-1] for k, v in parse_qs(route.query).items()}
             if route.path == '/api/health':
-                self.json({'app': 'Discord Archive Studio', 'version': '1.5.0','library_id':library_identity(self.server.store.root)})
+                self.json({'app': 'Discord Archive Studio', 'version': '1.5.1','library_id':library_identity(self.server.store.root)})
                 return
             if route.path in ('/', '/index.html', '/reader.html'):
                 payload = (self.server.web / ('reader.html' if route.path == '/reader.html' else 'index.html')).read_bytes()
