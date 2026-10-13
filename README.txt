@@ -2,7 +2,8 @@ DISCORD ARCHIVE STUDIO 1.3.3 — WINDOWS x64
 
 SHARED CUSTOM EMOJI LIBRARY
 Custom emoji references and reactions use one persistent local asset per emoji ID,
-shared across names, messages, channels and archives. Missing images queue once,
+shared across names, messages, channels and archives. Visible references go first
+within the same cap; other captured references fill the cache gradually. Missing images queue once,
 use committed text rests, share the 50-file/100 MB pending cap, and have a 1 MB
 per-image limit. Failed downloads retain a readable :name: label and require an
 explicit retry from Library's searchable Custom emoji library panel.

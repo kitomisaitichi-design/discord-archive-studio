@@ -74,7 +74,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS publications (server_id TEXT PRIMARY KEY,path TEXT NOT NULL,hash TEXT NOT NULL,
               options TEXT NOT NULL,updated REAL NOT NULL,size INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS channel_exports (channel_id TEXT PRIMARY KEY,options TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS emojis (id TEXT PRIMARY KEY,name TEXT,animated INTEGER,hash TEXT,kind TEXT,size INTEGER,status TEXT,detail TEXT,updated REAL);
+            CREATE TABLE IF NOT EXISTS emojis (id TEXT PRIMARY KEY,name TEXT,animated INTEGER,hash TEXT,kind TEXT,size INTEGER,status TEXT,detail TEXT,updated REAL,priority INTEGER NOT NULL DEFAULT 0);
             CREATE INDEX IF NOT EXISTS emoji_status ON emojis(status,updated);
             CREATE TABLE IF NOT EXISTS emoji_servers (emoji_id TEXT,server_id TEXT,PRIMARY KEY(emoji_id,server_id));
             CREATE TABLE IF NOT EXISTS emoji_names (emoji_id TEXT,name TEXT,PRIMARY KEY(emoji_id,name));
@@ -83,6 +83,8 @@ class Store:
             db.execute("UPDATE jobs SET status='paused',detail='Paused after restart; resume from the last committed page.' WHERE status IN ('running','waiting')")
             db.execute("UPDATE media_requests SET status='paused',detail='Paused after restart; retry explicitly.' WHERE status IN ('queued','running')")
             db.execute("UPDATE emojis SET status='queued',detail='Resuming captured emoji reference.' WHERE status='running'")
+            if 'priority' not in {r['name'] for r in db.execute('PRAGMA table_info(emojis)')}:
+                db.execute('ALTER TABLE emojis ADD COLUMN priority INTEGER NOT NULL DEFAULT 0')
             if 'quality' not in {r['name'] for r in db.execute('PRAGMA table_info(messages)')}:
                 if db.execute('SELECT count(*) FROM messages').fetchone()[0]:
                     recovery = self.root / 'Recovery'

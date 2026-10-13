@@ -1,6 +1,8 @@
 # Validation — 2026-10-13
 
-1.3.3 checks: 122 Python regressions cover global ID reuse across names/servers/reactions, static/animated CDN selection, code literals and escaping, shared reservations, durable deferred references, explicit failed retries, rest priority, grouped ZIP publication, offline embedded assets and source-bound HTTP requests. Actual isolated UI checks cover readable pending labels, inline graphics, shared-cache reuse, emoji-library filtering, empty search, scrolling and double refresh. Two captured IDs used two simulated downloads total. Synthetic CDN data is not a live availability guarantee.
+Live follow-up: the populated library exposed over 1,000 historical custom IDs. Visible-reference priority now promotes the current reading material ahead of background IDs while preserving the shared pending cap; a regression verifies the queue stays at 50. This avoids making a current reader wait for a whole historical emoji backlog.
+
+1.3.3 checks: 123 Python regressions cover global ID reuse across names/servers/reactions, static/animated CDN selection, code literals and escaping, shared reservations, durable deferred references, explicit failed retries, rest priority, grouped ZIP publication, offline embedded assets and source-bound HTTP requests. Actual isolated UI checks cover readable pending labels, inline graphics, shared-cache reuse, emoji-library filtering, empty search, scrolling and double refresh. Two captured IDs used two simulated downloads total. Synthetic CDN data is not a live availability guarantee.
 
 The populated 8768 recipient was updated during a committed rest: 27,069 messages, all 128 tasks, zero existing schedules and unchanged settings/checkpoints/rest were retained. Its reader loaded four real CDN profile pictures in place without an update banner. This is a current live smoke check, not exhaustive CDN or multi-day validation.
 

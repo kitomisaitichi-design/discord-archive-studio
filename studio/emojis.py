@@ -43,7 +43,7 @@ def references(message):
 
 def record(db,refs,server=None):
     for eid,e in refs.items():
-        db.execute("INSERT INTO emojis VALUES(?,?,?,NULL,NULL,0,'deferred','Captured reference; waiting for capacity.',?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,animated=max(emojis.animated,excluded.animated)",(eid,e['name'],int(e['animated']),time.time()))
+        db.execute("INSERT INTO emojis(id,name,animated,hash,kind,size,status,detail,updated) VALUES(?,?,?,NULL,NULL,0,'deferred','Captured reference; waiting for capacity.',?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,animated=max(emojis.animated,excluded.animated)",(eid,e['name'],int(e['animated']),time.time()))
         for name in e.get('names',[e['name']]):db.execute('INSERT OR IGNORE INTO emoji_names VALUES(?,?)',(eid,name))
         if server is not None:db.execute('INSERT OR IGNORE INTO emoji_servers VALUES(?,?)',(eid,str(server)))
 
@@ -96,7 +96,11 @@ class Emojis:
     def promote(self):
         with self.store.db() as db:
             db.execute('BEGIN IMMEDIATE');available=max(0,reservation(db))
-            ids=[r[0] for r in db.execute("SELECT id FROM emojis WHERE status='deferred' ORDER BY updated LIMIT ?",(available,))]
+            urgent=db.execute("SELECT count(*) FROM emojis WHERE status='deferred' AND priority=1").fetchone()[0]
+            demote=[r[0] for r in db.execute("SELECT id FROM emojis WHERE status='queued' AND priority=0 ORDER BY updated DESC LIMIT ?",(max(0,min(50,urgent-available)),))]
+            for eid in demote:db.execute("UPDATE emojis SET status='deferred',detail='Visible references go first; remains captured.' WHERE id=?",(eid,))
+            available+=len(demote)
+            ids=[r[0] for r in db.execute("SELECT id FROM emojis WHERE status='deferred' ORDER BY priority DESC,updated LIMIT ?",(available,))]
             for eid in ids:db.execute("UPDATE emojis SET status='queued',detail='Waiting for a committed text rest.' WHERE id=?",(eid,))
 
     def capture(self,messages,server=None):
@@ -109,6 +113,7 @@ class Emojis:
                 e['animated']=bool(e['animated'] or refs.get(eid,{}).get('animated'));refs[eid]=e
         with self.store.db() as db:
             record(db,refs,server)
+            for eid in refs:db.execute("UPDATE emojis SET priority=1 WHERE id=? AND priority=0 AND status IN ('queued','deferred')",(eid,))
             if server is None:
                 for cid,subset in by_channel.items():
                     row=db.execute('SELECT server_id FROM channels WHERE id=?',(cid,)).fetchone()
@@ -121,7 +126,7 @@ class Emojis:
     def task(self):
         self.promote()
         with self.store.db() as db:
-            row=db.execute("SELECT * FROM emojis WHERE status='queued' ORDER BY updated LIMIT 1").fetchone()
+            row=db.execute("SELECT * FROM emojis WHERE status='queued' ORDER BY priority DESC,updated LIMIT 1").fetchone()
             return dict(row) if row else None
 
     def update(self,eid,status,detail):

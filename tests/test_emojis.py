@@ -54,6 +54,13 @@ class EmojiTests(Base):
         self.emojis.promote()
         with self.store.db() as db:self.assertEqual(db.execute("SELECT count(*) FROM emojis WHERE status='queued'").fetchone()[0],9)
 
+    def test_visible_refs_take_priority_without_expanding_shared_cap(self):
+        self.save(' '.join('<:E%s:%s>'%(i,1000+i) for i in range(60)))
+        self.emojis.promote()
+        self.emojis.capture([message(9002,'<:E59:1059>')])
+        self.assertEqual(self.emojis.task()['id'],'1059')
+        with self.store.db() as db:self.assertEqual(db.execute("SELECT count(*) FROM emojis WHERE status IN ('queued','running')").fetchone()[0],50)
+
     def test_animation_format_and_content_hash_dedup(self):
         self.save('<a:Dance:123> <:Smile:456>')
         self.emojis.promote()
