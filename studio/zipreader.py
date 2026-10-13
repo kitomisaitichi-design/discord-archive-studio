@@ -16,6 +16,7 @@ import zipfile
 from .importing import parse_json, parse_txt, DceHTML, synthetic
 from .store import packed
 from . import reader_library
+from .emojis import Emojis,references
 
 
 MAX_ENTRY = 128 * 1024 * 1024
@@ -85,6 +86,7 @@ def parse_studio_text(text, cid, name):
 class ZipReader:
     def __init__(self, store, app_root=None, scan_parent=True):
         self.store = store
+        self.emojis = Emojis(store)
         self.root = store.root / 'reader-cache'
         self.root.mkdir(exist_ok=True)
         self.lock = threading.RLock()
@@ -226,7 +228,10 @@ class ZipReader:
                 with snapshot.open('rb') as source:
                     digest = hashlib.file_digest(source, 'sha256').hexdigest()
                 target = self.root / (digest+'.sqlite3')
-                if not target.exists():
+                valid=False
+                if target.exists():
+                    with closing(sqlite3.connect(target)) as db:valid=db.execute('PRAGMA user_version').fetchone()[0]>=2
+                if not valid:
                     self.build(snapshot, target)
                 self.known[key] = (signature, target, digest)
                 return target, digest, entry
@@ -246,6 +251,7 @@ class ZipReader:
                     CREATE TABLE assets(id TEXT PRIMARY KEY,kind TEXT,data BLOB);
                     CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);
                     CREATE VIRTUAL TABLE search USING fts5(body,author,tokenize='unicode61');''')
+                db.execute('PRAGMA user_version=2')
                 infos = {i.filename: i for i in archive.infolist() if not i.is_dir()}
                 manifest = {}
                 if 'manifest.json' in infos:
@@ -304,6 +310,16 @@ class ZipReader:
                         m['channel_name'] = title
                         m['channel_id'] = cid
                         author = m.get('author') or {}
+                        emoji_assets={}
+                        for eid,local in (m.get('emoji_assets') or {}).items():
+                            if isinstance(local,str) and re.fullmatch(r'\d{1,22}',str(eid)):
+                                aid=asset(posixpath.normpath(posixpath.join(folder,local)))
+                                if aid:
+                                    emoji_assets[str(eid)]=aid
+                                    row=db.execute('SELECT data FROM assets WHERE id=?',(aid,)).fetchone()
+                                    captured=references(m).get(str(eid),{})
+                                    self.emojis.import_asset(str(eid),row[0],captured.get('name','emoji'),captured.get('animated',False))
+                        if emoji_assets:m['_emoji_assets']=emoji_assets
                         avatar = author.get('avatar_local_path') or author.get('avatarUrl','')
                         if avatar and not avatar.startswith(('http:', 'https:')):
                             aid = asset(posixpath.normpath(posixpath.join(folder, avatar)))
@@ -379,7 +395,7 @@ class ZipReader:
             messages = [dict(json.loads(r['raw']),_seq=r['seq']) for r in rows]
             return {'generation':generation,'messages':messages,'total':total,'first':first,'last':last,'before':before,'after':after}
 
-    def saved_authors(self, key, channel, ids):
+    def saved_messages(self, key, channel, ids):
         entry=next((e for e in reader_library.entries(self.store) if e['id']==key),None)
         placeholders=','.join('?' for _ in ids)
         if entry:
@@ -390,7 +406,10 @@ class ZipReader:
             with closing(sqlite3.connect(path)) as db:
                 db.row_factory=sqlite3.Row
                 rows=db.execute('SELECT id,raw FROM messages WHERE channel=? AND id IN ('+placeholders+')',[channel]+ids).fetchall()
-        return {r['id']:json.loads(r['raw']).get('author') or {} for r in rows}
+        return {r['id']:json.loads(r['raw']) for r in rows}
+
+    def saved_authors(self, key, channel, ids):
+        return {mid:m.get('author') or {} for mid,m in self.saved_messages(key,channel,ids).items()}
 
     def asset(self, key, asset_id):
         if any(e['id']==key for e in reader_library.entries(self.store)):

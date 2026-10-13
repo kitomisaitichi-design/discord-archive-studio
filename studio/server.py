@@ -129,7 +129,7 @@ class Handler(BaseHTTPRequestHandler):
             route = urlparse(self.path)
             query = {k: v[-1] for k, v in parse_qs(route.query).items()}
             if route.path == '/api/health':
-                self.json({'app': 'Discord Archive Studio', 'version': '1.3.2','library_id':library_identity(self.server.store.root)})
+                self.json({'app': 'Discord Archive Studio', 'version': '1.3.3','library_id':library_identity(self.server.store.root)})
                 return
             if route.path in ('/', '/index.html', '/reader.html'):
                 payload = (self.server.web / ('reader.html' if route.path == '/reader.html' else 'index.html')).read_bytes()
@@ -143,6 +143,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.json(self.server.state())
             elif route.path == '/api/reader/catalog':
                 self.json({'archives':self.server.reader.catalogue(query.get('refresh')=='1'),'warnings':self.server.reader.discovery_warnings})
+            elif route.path == '/api/emojis/library':
+                self.json(self.server.worker.exporter.emojis.library(query.get('q','')))
+            elif re.fullmatch(r'/emoji/[a-f0-9]{64}',route.path):
+                digest=route.path.rsplit('/',1)[-1]
+                with self.server.store.db() as db:row=db.execute('SELECT kind FROM emojis WHERE hash=? LIMIT 1',(digest,)).fetchone()
+                path=self.server.store.root/'emojis'/digest
+                if not row or not path.is_file():raise ValueError('Emoji image is not saved.')
+                payload=path.read_bytes();self.send_headers(kind=row['kind'],length=len(payload));self.wfile.write(payload)
             elif route.path in ('/api/reader/overview','/api/reader/calendar','/api/reader/messages'):
                 self.json(self.server.reader.query(query.get('archive',''),route.path.rsplit('/',1)[-1],query))
             elif route.path == '/api/reader/asset':
@@ -210,7 +218,7 @@ class Handler(BaseHTTPRequestHandler):
                 with path.open('rb') as source:
                     while block := source.read(256*1024):
                         self.wfile.write(block)
-            elif route.path in ('/app.js', '/style.css', '/server-picker.js', '/queue.js', '/queue-settings.js', '/people.js', '/archives.js', '/reader.js', '/reader.css', '/avatar-cache.js'):
+            elif route.path in ('/app.js', '/style.css', '/server-picker.js', '/queue.js', '/queue-settings.js', '/people.js', '/archives.js', '/reader.js', '/reader.css', '/avatar-cache.js', '/emoji-cache.js', '/emoji-library.js'):
                 path = self.server.web / route.path.lstrip('/')
                 payload = path.read_bytes()
                 self.send_headers(kind='text/javascript; charset=utf-8' if path.suffix=='.js' else 'text/css; charset=utf-8', length=len(payload))
@@ -380,6 +388,17 @@ class Handler(BaseHTTPRequestHandler):
         elif path == '/api/media/cancel':
             store.update_media(valid_id(data['id']),status='cancelled',detail='Cancelled manually; existing cached files retained.')
             worker.signal()
+        elif path == '/api/emojis/visible':
+            ids=data.get('messages')
+            if not isinstance(ids,list) or not 1<=len(ids)<=80 or any(not isinstance(i,str) or not re.fullmatch(r'\d{1,22}',i) for i in ids):raise ValueError('Choose up to 80 saved message IDs.')
+            ids=list(dict.fromkeys(ids))
+            if data.get('archive'):
+                messages=self.server.reader.saved_messages(data['archive'],data.get('channel',''),ids).values()
+            else:
+                with store.db() as db:messages=[json.loads(r['raw']) for r in db.execute('SELECT raw FROM messages WHERE id IN ('+','.join('?' for _ in ids)+')',ids)]
+            result=worker.exporter.emojis.capture(messages);worker.signal();return result
+        elif path == '/api/emojis/retry':
+            worker.exporter.emojis.retry(data.get('ids'));worker.signal()
         elif path == '/api/avatars/visible':
             ids = data.get('messages')
             if not isinstance(ids,list) or not 1 <= len(ids) <= 80 or any(not isinstance(i,str) or not re.fullmatch(r'\d{1,22}',i) for i in ids):

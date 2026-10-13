@@ -49,6 +49,14 @@ class DceHTML(HTMLParser):
             self.text_depth = len(self.stack)
         if self.text_depth and tag == 'br':
             self.body.append('\n')
+        if self.text_depth and tag == 'img':
+            src=attr.get('src','');eid=attr.get('data-emoji-id','')
+            remote=re.match(r'https://(?:cdn\.discordapp\.com|media\.discordapp\.net)/emojis/(\d{1,22})\.(png|gif|webp)',src)
+            if remote:eid=remote[1]
+            name=attr.get('alt','').strip(':')
+            if re.fullmatch(r'\d{1,22}',eid) and re.fullmatch(r'[A-Za-z0-9_]{1,100}',name):
+                self.body.append('<'+('a' if remote and remote[2]=='gif' else '')+':'+name+':'+eid+'>')
+                if re.fullmatch(r'\.\./\.\./emojis/[a-f0-9]{64}',src):self.message.setdefault('emoji_assets',{})[eid]=src
         if self.message and 'chatlog__reply-link' in classes:
             match = re.search(r'\d{17,22}', attr.get('onclick', ''))
             if match:

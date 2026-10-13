@@ -74,10 +74,15 @@ class Store:
             CREATE TABLE IF NOT EXISTS publications (server_id TEXT PRIMARY KEY,path TEXT NOT NULL,hash TEXT NOT NULL,
               options TEXT NOT NULL,updated REAL NOT NULL,size INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS channel_exports (channel_id TEXT PRIMARY KEY,options TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS emojis (id TEXT PRIMARY KEY,name TEXT,animated INTEGER,hash TEXT,kind TEXT,size INTEGER,status TEXT,detail TEXT,updated REAL);
+            CREATE INDEX IF NOT EXISTS emoji_status ON emojis(status,updated);
+            CREATE TABLE IF NOT EXISTS emoji_servers (emoji_id TEXT,server_id TEXT,PRIMARY KEY(emoji_id,server_id));
+            CREATE TABLE IF NOT EXISTS emoji_names (emoji_id TEXT,name TEXT,PRIMARY KEY(emoji_id,name));
             CREATE TABLE IF NOT EXISTS presets (name TEXT PRIMARY KEY,options TEXT NOT NULL);
             ''')
             db.execute("UPDATE jobs SET status='paused',detail='Paused after restart; resume from the last committed page.' WHERE status IN ('running','waiting')")
             db.execute("UPDATE media_requests SET status='paused',detail='Paused after restart; retry explicitly.' WHERE status IN ('queued','running')")
+            db.execute("UPDATE emojis SET status='queued',detail='Resuming captured emoji reference.' WHERE status='running'")
             if 'quality' not in {r['name'] for r in db.execute('PRAGMA table_info(messages)')}:
                 if db.execute('SELECT count(*) FROM messages').fetchone()[0]:
                     recovery = self.root / 'Recovery'
@@ -138,6 +143,7 @@ class Store:
             db.execute('BEGIN IMMEDIATE')
             pending = {r['attachment_id']:r['max_bytes'] for r in db.execute("SELECT * FROM media_requests WHERE status IN ('queued','running')")}
             avatar_count = db.execute("SELECT count(*) FROM avatar_tasks WHERE status IN ('queued','running')").fetchone()[0] if db.execute("SELECT 1 FROM sqlite_master WHERE name='avatar_tasks'").fetchone() else 0
+            avatar_count += db.execute("SELECT count(*) FROM emojis WHERE status IN ('queued','running')").fetchone()[0]
             added = skipped = 0
             for selection in selections:
                 mid, aid = valid_id(selection['message_id']), valid_id(selection['attachment_id'])
@@ -184,7 +190,8 @@ class Store:
         cid = valid_id(channel_id)
         added = edited = 0
         with self.db() as db:
-            if not db.execute('SELECT 1 FROM channels WHERE id=?', (cid,)).fetchone():
+            channel=db.execute('SELECT server_id FROM channels WHERE id=?', (cid,)).fetchone()
+            if not channel:
                 raise ValueError('Select a known channel before importing messages.')
             for original in messages:
                 m = dict(original)
@@ -214,6 +221,8 @@ class Store:
                 old = db.execute('SELECT hash,raw,channel_id,quality FROM messages WHERE id=?', (mid,)).fetchone()
                 if old and old['quality'] > quality:
                     continue
+                from .emojis import references,record
+                record(db,references(m),channel['server_id'])
                 db.execute('INSERT OR REPLACE INTO users VALUES(?,?,?)', (aid, author.get('global_name') or author.get('username', aid), packed(author)))
                 if old and old['hash'] == digest:
                     # Refresh attachment URLs without counting it as an edit.

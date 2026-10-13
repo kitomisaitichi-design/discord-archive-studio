@@ -407,6 +407,43 @@ class Worker:
             avatars.update(key,'failed','Profile-picture download or ZIP update failed: '+str(error)+'. Retry explicitly.')
         self.store.set_setting('media_next',time.time()+varied_delay(5,25))
 
+    def flush_emoji_zips(self):
+        dirty=self.store.setting('emoji_zip_dirty',[])
+        if not dirty:return
+        sid=dirty[0]
+        with self.store.db() as db:published=db.execute('SELECT 1 FROM publications WHERE server_id=?',(sid,)).fetchone()
+        if published:self.exporter.publish(sid,options(None),self.destination(),self.avatar_window,selected_channels=[])
+        self.store.set_setting('emoji_zip_dirty',dirty[1:])
+        self.store.set_setting('emoji_zip_next',time.time()+60)
+        self.store.set_setting('emoji_zip_retry',False)
+
+    def process_emoji(self):
+        if not self.avatar_window():return
+        emojis=self.exporter.emojis;task=emojis.task()
+        if self.store.setting('emoji_zip_dirty',[]) and ((not task and not self.store.setting('emoji_zip_retry',False)) or time.time()>=self.store.setting('emoji_zip_next',0)):
+            try:self.flush_emoji_zips()
+            except Interrupted:return
+            except Exception as error:
+                self.store.set_setting('worker_error','Local emoji ZIP update failed: '+str(error))
+                self.store.set_setting('emoji_zip_next',time.time()+60)
+                self.store.set_setting('emoji_zip_retry',True)
+            return
+        if not task or time.time()<self.store.setting('media_next',0):return
+        eid=task['id'];emojis.update(eid,'running','Downloading captured emoji once…')
+        def control():
+            if not self.avatar_window():return False
+            with self.store.db() as db:return db.execute('SELECT status FROM emojis WHERE id=?',(eid,)).fetchone()[0]=='running'
+        try:
+            emojis.fetch(task,control)
+            if not control():raise Interrupted('Yielded to text work.')
+            emojis.update(eid,'completed','Cached globally; reused across saved chats.')
+            dirty=self.store.setting('emoji_zip_dirty',[])
+            self.store.set_setting('emoji_zip_dirty',list(dict.fromkeys(dirty+emojis.servers(eid))))
+            if not dirty:self.store.set_setting('emoji_zip_next',time.time()+60)
+        except Interrupted:emojis.update(eid,'queued','Waiting for a committed text rest.')
+        except Exception as error:emojis.update(eid,'failed','Emoji unavailable: '+str(error)+'. Readable label retained; retry explicitly.')
+        self.store.set_setting('media_next',time.time()+varied_delay(5,25))
+
     def run(self):
         while not self.stop.is_set():
             try:
@@ -435,6 +472,7 @@ class Worker:
                                 self.store.set_setting('cooldown_until', time.time()+900)
                             finally:
                                 self.store.release_job(job['id'])
+                self.process_emoji()
                 self.process_media()
                 self.process_avatar()
             except Exception as error:

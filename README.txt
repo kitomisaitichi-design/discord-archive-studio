@@ -1,4 +1,17 @@
-DISCORD ARCHIVE STUDIO 1.3.2 — WINDOWS x64
+DISCORD ARCHIVE STUDIO 1.3.3 — WINDOWS x64
+
+SHARED CUSTOM EMOJI LIBRARY
+Custom emoji references and reactions use one persistent local asset per emoji ID,
+shared across names, messages, channels and archives. Missing images queue once,
+use committed text rests, share the 50-file/100 MB pending cap, and have a 1 MB
+per-image limit. Failed downloads retain a readable :name: label and require an
+explicit retry from Library's searchable Custom emoji library panel.
+Existing embedded ZIP graphics populate the same cache without a CDN request.
+Unicode emoji render with the local system font. Code literals and raw canonical
+JSON retain their original text. HTML and ZIP reader show local images; Markdown
+links local graphics; plain text uses readable names. Local ZIP updates are
+grouped when downloads drain, or about once per minute during a longer batch.
+No message-history or server-member request is needed for rendering.
 
 START
 The VBS first checks its own folder and immediate parent. If separated from the

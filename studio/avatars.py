@@ -53,6 +53,7 @@ class Avatars:
         with self.store.db() as db:
             db.execute('BEGIN IMMEDIATE')
             pending = db.execute("SELECT count(*) FROM avatar_tasks WHERE status IN ('queued','running')").fetchone()[0]
+            pending += db.execute("SELECT count(*) FROM emojis WHERE status IN ('queued','running')").fetchone()[0]
             media = db.execute("SELECT count(*),coalesce(sum(max_bytes),0) FROM media_requests WHERE status IN ('queued','running')").fetchone()
             available = min(50-media[0]-pending,(100_000_000-media[1]-pending*1_000_000)//1_000_000)
             seen = set()
@@ -81,6 +82,7 @@ class Avatars:
         with self.store.db() as db:
             db.execute('BEGIN IMMEDIATE')
             pending = db.execute("SELECT count(*) FROM avatar_tasks WHERE status IN ('queued','running')").fetchone()[0]
+            pending += db.execute("SELECT count(*) FROM emojis WHERE status IN ('queued','running')").fetchone()[0]
             media = db.execute("SELECT count(*),coalesce(sum(max_bytes),0) FROM media_requests WHERE status IN ('queued','running')").fetchone()
             available = min(50-media[0]-pending,(100_000_000-media[1]-pending*1_000_000)//1_000_000)
             for mid, author in authors.items():

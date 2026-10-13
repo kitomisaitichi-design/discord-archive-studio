@@ -24,6 +24,20 @@ class LocalHTTPTests(unittest.TestCase):
     def tearDown(self):
         self.server.shutdown();self.server.server_close();self.thread.join(2);self.temp.cleanup()
 
+    def test_emoji_endpoint_resolves_saved_refs_caps_repeated_request_and_fallback(self):
+        from test_studio import SID,CID,message
+        from studio.reader_library import library_id
+        self.browser.open(self.url+'/reader.html').close()
+        self.server.store.catalog([{'id':SID,'name':'Fixture'}],[{'id':CID,'name':'chat'}],SID)
+        self.server.store.upsert(CID,[message(9001,'<:Clueless:123>')])
+        for source in ({},{'archive':library_id(SID),'channel':CID}):
+            with self.post('emojis/visible',dict(source,messages=['9001'])) as response:self.assertEqual(json.load(response)['emojis']['123']['status'],'queued')
+        with self.server.store.db() as db:self.assertEqual(db.execute('SELECT count(*) FROM emojis').fetchone()[0],1)
+        with self.browser.open(self.url+'/api/emojis/library?q=Clueless') as response:self.assertEqual(len(json.load(response)['emojis']),1)
+        with self.post('emojis/visible',{'messages':['9999']}) as response:self.assertEqual(json.load(response)['emojis'],{})
+        for invalid in ([],['https://evil.test/emoji'],['9001']*81):
+            with self.assertRaises(HTTPError):self.post('emojis/visible',{'messages':invalid})
+
     def test_visible_avatar_endpoint_resolves_saved_ids_and_rejects_arbitrary_urls(self):
         from test_studio import SID,CID,UID,message
         from studio.reader_library import library_id
@@ -46,7 +60,7 @@ class LocalHTTPTests(unittest.TestCase):
         with self.browser.open(self.url+'/') as response:
             self.assertIn('SameSite=Strict',response.headers['Set-Cookie'])
             self.assertIn(b'Keep the conversation.',response.read())
-        for resource in ('app.js','style.css','server-picker.js','queue.js','queue-settings.js','people.js','archives.js','reader.js','reader.css','avatar-cache.js'):
+        for resource in ('app.js','style.css','server-picker.js','queue.js','queue-settings.js','people.js','archives.js','reader.js','reader.css','avatar-cache.js','emoji-cache.js','emoji-library.js'):
             with self.browser.open(self.url+'/'+resource) as response:self.assertGreater(len(response.read()),100)
         with self.browser.open(self.url+'/api/state') as response:
             self.assertNotIn('token',json.load(response)['connection'])

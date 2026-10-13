@@ -10,6 +10,7 @@ import zipfile
 from .store import fingerprint, packed
 from .discord import download, Interrupted, MediaTooLarge
 from .avatars import avatar_key
+from .emojis import Emojis,references,record,content_html,content_text
 
 
 FORMAT_ORDER = ('json','html','md','txt')
@@ -72,8 +73,11 @@ def author_name(m):
     return author.get('global_name') or author.get('nickname') or author.get('username') or author.get('name') or 'Unknown'
 
 
-def normalized(message, opts, media, requests=None, avatars=None):
+def normalized(message, opts, media, requests=None, avatars=None, emojis=None):
     m = json.loads(packed(message))
+    m.pop('emoji_assets',None)
+    assets={eid:'../../emojis/'+emojis[eid]['hash'] for eid in references(m) if eid in (emojis or {})}
+    if assets:m['emoji_assets']=assets
     m.get('author', {}).pop('avatar_local_path', None)
     captured = avatar_key(m.get('author', {}))
     saved_avatar = (avatars or {}).get(captured[0]) if captured else None
@@ -111,7 +115,7 @@ def render(messages, fmt, channel, opts):
             lines.append(('### ' if fmt == 'md' else '[') + label + ('' if fmt == 'md' else ']'))
             if m.get('message_reference'):
                 lines.append('Reply to: ' + str(m['message_reference'].get('message_id', '')))
-            lines.append(m.get('content', ''))
+            lines.append(content_text(m.get('content', ''),m.get('emoji_assets'),fmt=='md'))
             for attachment in m.get('attachments', []):
                 url = attachment.get('local_path') or attachment.get('url', '')
                 if fmt == 'md':
@@ -140,20 +144,21 @@ def render(messages, fmt, channel, opts):
             elif safe_url:
                 attachments.append('<a href="%s">📎 %s</a>' % (esc(safe_url, quote=True), label))
             attachments.append('<small>%s</small>' % esc(a.get('download_status','')))
-        reactions = ' '.join('%s ×%s' % (esc(r.get('emoji', {}).get('name') or '?'), r.get('count', 0)) for r in m.get('reactions', []))
+        assets=m.get('emoji_assets',{})
+        reactions = ' '.join('%s ×%s' % (content_html('<:'+str(r['emoji'].get('name') or 'emoji')+':'+str(r['emoji']['id'])+'>',assets) if r.get('emoji',{}).get('id') else esc(r.get('emoji',{}).get('name') or '?'),r.get('count',0)) for r in m.get('reactions',[]))
         reply = m.get('message_reference', {}).get('message_id')
         color = m.get('author', {}).get('role_color', 0) if opts['role_colors'] else 0
         color = '#%06x' % int(color) if isinstance(color, int) and 0 <= color <= 0xffffff else '#b6a4ff'
-        embeds = ''.join('<aside><b>%s</b><p>%s</p></aside>' % (esc(e.get('title', '')), esc(e.get('description', ''))) for e in m.get('embeds', []))
+        embeds = ''.join('<aside><b>%s</b><p>%s</p></aside>' % (content_html(e.get('title', ''),assets), content_html(e.get('description', ''),assets)) for e in m.get('embeds', []))
         avatar = m.get('author', {}).get('avatar_local_path','')
         picture = '<img class="pfp" width="40" height="40" src="%s" alt="" loading="lazy">' % esc(avatar,quote=True) if re.fullmatch(r'\.\./\.\./avatars/[a-f0-9]{64}',avatar) else ''
         cards.append('<article id="m%s"><header>%s<b style="color:%s">%s</b><time>%s</time></header>%s<div class="content">%s</div>%s%s<footer>%s %s</footer></article>' %
                      (esc(m['id'], quote=True), picture, color, esc(author_name(m)), esc(m.get('timestamp', '')),
-                      '<small>↩ Reply to '+esc(str(reply))+'</small>' if reply else '', esc(m.get('content', '')), ''.join(attachments), embeds, reactions,
+                      '<small>↩ Reply to '+esc(str(reply))+'</small>' if reply else '', content_html(m.get('content', ''),assets), ''.join(attachments), embeds, reactions,
                       '· edited '+esc(m.get('edited_timestamp', '')) if m.get('edited_timestamp') else ''))
     return '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src https: data: file:; media-src https: file:">
-    <title>''' + esc(channel['name']) + '''</title><style>body{background:#0c1220;color:#e8edf7;font:16px system-ui;margin:0 auto;max-width:1000px;padding:32px}article{background:#141e30;border:1px solid #273750;border-radius:14px;padding:20px;margin:12px 0}header{display:flex;gap:16px;align-items:center}time,footer,small{color:#99a9c2;font-size:12px}.content{white-space:pre-wrap;overflow-wrap:anywhere;margin:12px 0}img{display:block;max-width:100%;max-height:500px;border-radius:10px}a{color:#a69bff}aside{border-left:3px solid #7865ff;padding:10px}</style><h1>''' + esc(channel['name']) + '</h1>' + ''.join(cards) + '</html>'
+    <title>''' + esc(channel['name']) + '''</title><style>body{background:#0c1220;color:#e8edf7;font:16px system-ui;margin:0 auto;max-width:1000px;padding:32px}article{background:#141e30;border:1px solid #273750;border-radius:14px;padding:20px;margin:12px 0}header{display:flex;gap:16px;align-items:center}time,footer,small{color:#99a9c2;font-size:12px}.content{white-space:pre-wrap;overflow-wrap:anywhere;margin:12px 0}img{display:block;max-width:100%;max-height:500px;border-radius:10px}.custom-emoji{display:inline-block;width:1.4em;height:1.4em;max-height:1.4em;object-fit:contain;vertical-align:middle;border-radius:0}a{color:#a69bff}aside{border-left:3px solid #7865ff;padding:10px}</style><h1>''' + esc(channel['name']) + '</h1>' + ''.join(cards) + '</html>'
 
 
 class Exporter:
@@ -161,6 +166,7 @@ class Exporter:
         self.store = store
         from .avatars import Avatars
         self.avatars = Avatars(store)
+        self.emojis = Emojis(store)
 
     def download_selected(self, task, control):
         aid, cid = task['attachment_id'], task['channel_id']
@@ -226,6 +232,7 @@ class Exporter:
             requests = {r['attachment_id']:dict(r) for r in db.execute('SELECT * FROM media_requests')}
             previous = db.execute('SELECT * FROM publications WHERE server_id=?', (server_id,)).fetchone()
         avatars = self.avatars.cached()
+        emojis = self.emojis.cached()
         for channel in channels:
             if channel['id'] in affected and views.get(channel['id'],opts).get('include_avatars'):
                 self.avatars.queue([channel['id']])
@@ -235,7 +242,9 @@ class Exporter:
         with self.store.db() as db:
             pictured_users={r[0] for r in db.execute("SELECT DISTINCT m.author_id FROM messages m JOIN channels c ON c.id=m.channel_id JOIN channel_exports e ON e.channel_id=c.id WHERE c.server_id=? AND json_extract(e.options,'$.include_avatars')=1",(server_id,))}
         picture_versions={key:saved['hash'] for key,saved in avatars.items() if key.split(':',1)[0] in pictured_users}
-        digest = fingerprint({'reader_schema':1,'server_name':server_name,'channels': [(c['id'], c['name'], c['generation'], c['history_done']) for c in channels], 'options': presentation,'avatars':picture_versions})
+        with self.store.db() as db:
+            emoji_ids={r[0] for r in db.execute('SELECT emoji_id FROM emoji_servers WHERE server_id=?',(server_id,))}
+        digest = fingerprint({'reader_schema':2,'server_name':server_name,'channels': [(c['id'], c['name'], c['generation'], c['history_done']) for c in channels], 'options': presentation,'avatars':picture_versions,'emojis':{eid:emojis[eid]['hash'] for eid in emoji_ids if eid in emojis}})
         target = destination / ('server_%s.zip' % server_id)
         if previous and previous['hash'] == digest and previous['path'] == str(target) and target.is_file():
             return {'path': str(target), 'unchanged': True, 'bytes': target.stat().st_size}
@@ -243,7 +252,7 @@ class Exporter:
         os.close(handle)
         temp = Path(name)
         try:
-            index, used_media, used_avatars = [], set(), set()
+            index, used_media, used_avatars, used_emojis, captured_emojis = [], set(), set(), set(), {}
             with zipfile.ZipFile(temp, 'w', zipfile.ZIP_DEFLATED, compresslevel=4) as archive:
                 archive.writestr('README.txt', 'Discord Archive Studio\nOpen index.html to browse channels. JSON preserves stable message IDs.\nCaptured data may be partial during a paced export. Deleted messages and unseen edits are not recoverable.\n')
                 for channel in channels:
@@ -264,7 +273,9 @@ class Exporter:
                             raise Interrupted('ZIP publication paused; previous ZIP remains intact.')
                         if not filtered(m, channel_opts):
                             continue
-                        normalized_message = normalized(m, channel_opts, media, requests, avatars)
+                        captured_emojis.update(references(m))
+                        normalized_message = normalized(m, channel_opts, media, requests, avatars, emojis)
+                        used_emojis.update(path[6:] for path in normalized_message.get('emoji_assets',{}).values())
                         if normalized_message.get('author',{}).get('avatar_local_path'):
                             used_avatars.add(normalized_message['author']['avatar_local_path'][6:])
                         estimated = len(packed(normalized_message).encode('utf-8'))
@@ -285,9 +296,12 @@ class Exporter:
                 manifest = {'schema': 'discord-archive-studio/1', 'server_id': server_id, 'server_name':server_name, 'content_hash': digest, 'channels': channels, 'files': index, 'options': presentation}
                 for relative in used_avatars:
                     archive.write(self.store.root/relative,relative)
+                for relative in used_emojis:
+                    archive.write(self.store.root/relative,relative)
                 archive.writestr('manifest.json', packed(manifest))
                 links = ''.join('<li><a href="%s">%s — %s (%s messages)</a></li>' % (html.escape(i['file'], quote=True), html.escape(i['channel']), i['format'].upper(), i['messages']) for i in index)
                 archive.writestr('index.html', '<!doctype html><meta charset="utf-8"><title>'+html.escape(server_name)+'</title><style>body{font:16px system-ui;background:#0c1220;color:#eee;padding:32px}a{color:#b6a4ff}li{margin:12px}</style><h1>'+html.escape(server_name)+'</h1><ul>'+links+'</ul>')
+            with self.store.db() as db:record(db,captured_emojis,server_id)
             with zipfile.ZipFile(temp) as verify:
                 broken = verify.testzip()
                 if broken:
