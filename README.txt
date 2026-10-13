@@ -264,7 +264,7 @@ action; queue again when earlier downloads finish. Failures are not retried
 automatically. Cached bytes are reused and deduplicated by their SHA-256.
 Pictures appear in the reader and saved HTML/JSON; Markdown/TXT retain their
 normal text format, with native metadata carrying the author association.
-Real CDN downloading and multi-day operation require live validation.
+Real CDN availability varies; multi-day operation remains unverified.
 
 QUEUE SELECTION AND MOVEMENT (1.3.1)
 Check all selects current editable tasks; Invert selection checks all except
