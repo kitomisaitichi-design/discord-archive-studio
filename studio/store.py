@@ -96,6 +96,9 @@ class Store:
                         db.backup(backup)
                 db.execute('ALTER TABLE messages ADD COLUMN quality INTEGER NOT NULL DEFAULT 4')
 
+        from .searching import install
+        with self.db() as db: install(db)
+
     @contextmanager
     def db(self):
         db = sqlite3.connect(self.path, timeout=20)
@@ -226,9 +229,11 @@ class Store:
                 from .emojis import references,record
                 record(db,references(m),channel['server_id'])
                 db.execute('INSERT OR REPLACE INTO users VALUES(?,?,?)', (aid, author.get('global_name') or author.get('username', aid), packed(author)))
+                from .searching import index_message
                 if old and old['hash'] == digest:
                     # Refresh attachment URLs without counting it as an edit.
                     db.execute('UPDATE messages SET raw=?,quality=max(quality,?) WHERE id=?', (packed(m), quality, mid))
+                    index_message(db,db.execute('SELECT rowid FROM messages WHERE id=?',(mid,)).fetchone()[0],m)
                     continue
                 if old:
                     edited += 1
@@ -241,6 +246,7 @@ class Store:
                   channel_id=excluded.channel_id,author_id=excluded.author_id,timestamp=excluded.timestamp,content=excluded.content,hash=excluded.hash,
                   raw=excluded.raw,captured=excluded.captured,quality=excluded.quality''',
                   (mid, cid, aid, order_time, m.get('content', ''), digest, packed(m), time.time(), quality))
+                index_message(db,db.execute('SELECT rowid FROM messages WHERE id=?',(mid,)).fetchone()[0],m)
             if added or edited:
                 db.execute('UPDATE channels SET generation=generation+1 WHERE id=?', (cid,))
         return {'added': added, 'edited': edited}
@@ -256,12 +262,13 @@ class Store:
             return [dict(r) for r in db.execute('''SELECT s.id,s.name,(SELECT count(*) FROM channels c WHERE c.server_id=s.id) channels,
               (SELECT count(*) FROM messages m JOIN channels c ON c.id=m.channel_id WHERE c.server_id=s.id) messages FROM servers s ORDER BY s.name''')]
 
-    def search(self, text='', channel=None, server=None, person=None, start=None, end=None, offset=0, limit=80):
+    def search(self, text='', channel=None, server=None, person=None, start=None, end=None, offset=0, limit=80, attachment='', media_type='', phrase=False, cursor=None):
+        from .searching import match_text, metadata_filter, backfill
         terms = text.strip().split()
         where, params = [], []
         if terms:
             # Treat user input as literal FTS terms; punctuation/operator syntax cannot break a query.
-            query = ' AND '.join('"' + term.replace('"', '""') + '"' for term in terms[:30])
+            query = match_text(text,phrase)
             if text.strip().isdigit() and len(text.strip()) <= 22:
                 where.append('(m.id=? OR m.rowid IN (SELECT rowid FROM message_fts WHERE message_fts MATCH ?))')
                 params.extend([text.strip(), query])
@@ -272,9 +279,8 @@ class Store:
             if value:
                 where.append(field + '=?')
                 params.append(str(value))
-        if person:
-            where.append("COALESCE(a.person_id,m.author_id)=COALESCE((SELECT person_id FROM aliases WHERE user_id=?),?)")
-            params.extend([str(person), str(person)])
+        extra,values=metadata_filter({'person':person,'attachment':attachment,'type':media_type})
+        where+=extra;params+=values
         if start:
             where.append('m.timestamp>=?')
             params.append(start)
@@ -284,11 +290,18 @@ class Store:
         condition = ' AND '.join(where) or '1'
         join = ' FROM messages m JOIN channels c ON c.id=m.channel_id LEFT JOIN aliases a ON a.user_id=m.author_id '
         with self.db() as db:
+            if person or attachment or media_type: backfill(db,channel)
             count = db.execute('SELECT count(*)' + join + ' WHERE ' + condition, params).fetchone()[0]
-            rows = db.execute('SELECT m.raw,m.channel_id,c.name channel_name,c.server_id' + join + ' WHERE ' + condition +
+            if cursor:
+                from .reader_library import decode_cursor
+                where_cursor=' AND (m.timestamp,length(m.id),m.id)<(?,?,?)'
+                cursor_args=decode_cursor(cursor)
+            else:where_cursor='';cursor_args=[]
+            rows = db.execute('SELECT m.id,m.timestamp,m.raw,m.channel_id,c.name channel_name,c.server_id' + join + ' WHERE ' + condition + where_cursor +
                               ' ORDER BY m.timestamp DESC,length(m.id) DESC,m.id DESC LIMIT ? OFFSET ?',
-                              params + [max(1, min(int(limit), 200)), max(0, int(offset))]).fetchall()
-        return {'total': count, 'messages': [dict(json.loads(r['raw']), channel_name=r['channel_name'], server_id=r['server_id']) for r in rows]}
+                              params + cursor_args + [max(1, min(int(limit), 200)), 0 if cursor else max(0, int(offset))]).fetchall()
+        from .reader_library import cursor as encode_cursor
+        return {'total': count, 'messages': [dict(json.loads(r['raw']), channel_name=r['channel_name'], server_id=r['server_id'],_cursor=encode_cursor(r)) for r in rows]}
 
     def preview(self, channel_id, before=None, limit=50):
         cid=valid_id(channel_id);limit=max(1,min(int(limit),100))

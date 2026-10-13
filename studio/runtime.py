@@ -444,6 +444,11 @@ class Worker:
         except Exception as error:emojis.update(eid,'failed','Emoji unavailable: '+str(error)+'. Readable label retained; retry explicitly.')
         self.store.set_setting('media_next',time.time()+varied_delay(5,25))
 
+    def process_search_index(self):
+        if getattr(self,'facets_ready',False) or not self.avatar_window():return
+        from .searching import backfill
+        with self.store.db() as db:self.facets_ready=backfill(db)<500
+
     def run(self):
         while not self.stop.is_set():
             try:
@@ -475,6 +480,7 @@ class Worker:
                 self.process_emoji()
                 self.process_media()
                 self.process_avatar()
+                self.process_search_index()
             except Exception as error:
                 self.store.set_setting('worker_error', str(error))
             self.wake.wait(2)

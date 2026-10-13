@@ -230,7 +230,7 @@ class ZipReader:
                 target = self.root / (digest+'.sqlite3')
                 valid=False
                 if target.exists():
-                    with closing(sqlite3.connect(target)) as db:valid=db.execute('PRAGMA user_version').fetchone()[0]>=2
+                    with closing(sqlite3.connect(target)) as db:valid=db.execute('PRAGMA user_version').fetchone()[0]>=3
                 if not valid:
                     self.build(snapshot, target)
                 self.known[key] = (signature, target, digest)
@@ -251,7 +251,7 @@ class ZipReader:
                     CREATE TABLE assets(id TEXT PRIMARY KEY,kind TEXT,data BLOB);
                     CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);
                     CREATE VIRTUAL TABLE search USING fts5(body,author,tokenize='unicode61');''')
-                db.execute('PRAGMA user_version=2')
+                db.execute('PRAGMA user_version=3')
                 infos = {i.filename: i for i in archive.infolist() if not i.is_dir()}
                 manifest = {}
                 if 'manifest.json' in infos:
@@ -261,9 +261,9 @@ class ZipReader:
                 # Prefer detailed JSON; duplicate IDs are indexed exactly once per channel.
                 candidates.sort(key=lambda n: (0 if n.endswith('.json') else 1 if n.endswith(('.html','.htm')) else 2, n))
                 parsed, asset_bytes, warnings = 0, 0, []
-                def asset(path):
+                def asset(path,filename=''):
                     nonlocal asset_bytes
-                    if not safe_entry(path) or path not in infos or infos[path].file_size > 10_000_000:
+                    if not safe_entry(path) or path not in infos or infos[path].file_size > (10_000_000 if (filename or path).lower().endswith(('.mp4','.webm','.mov','.mkv')) else 100_000_000):
                         return None
                     aid = hashlib.sha256(path.encode()).hexdigest()
                     if db.execute('SELECT 1 FROM assets WHERE id=?',(aid,)).fetchone():
@@ -271,8 +271,8 @@ class ZipReader:
                     if asset_bytes+infos[path].file_size > 100_000_000:
                         return None
                     raw = archive.read(path)
-                    from .avatars import image_kind
-                    kind = image_kind(raw) or 'application/octet-stream'
+                    from .local_media import mime
+                    kind = mime(filename or path,raw)
                     db.execute('INSERT INTO assets VALUES(?,?,?)',(aid,kind,raw))
                     asset_bytes += len(raw)
                     return aid
@@ -327,7 +327,7 @@ class ZipReader:
                         for attachment in m.get('attachments', []):
                             local = attachment.get('local_path') or attachment.get('url','')
                             if local and not local.startswith(('http:', 'https:')):
-                                aid = asset(posixpath.normpath(posixpath.join(folder,local)))
+                                aid = asset(posixpath.normpath(posixpath.join(folder,local)),attachment.get('filename') or attachment.get('fileName') or '')
                                 if aid: attachment['_asset'] = aid
                         author_name = author.get('global_name') or author.get('nickname') or author.get('username') or author.get('name') or 'Unknown'
                         db.execute('INSERT OR IGNORE INTO messages VALUES(?,?,?,?,?,?,?,?,NULL)',
@@ -344,7 +344,7 @@ class ZipReader:
             temp.unlink(missing_ok=True)
 
     def query(self, key, kind, query):
-        entry=next((e for e in reader_library.entries(self.store) if e['id']==key),None)
+        entry=reader_library.entry(self.store,key)
         if entry:
             return reader_library.query(self.store,entry,kind,query,AvatarsView(self.store))
         path, generation, entry = self.index(key)
@@ -365,11 +365,16 @@ class ZipReader:
             if kind != 'messages': raise ValueError('Unknown reader operation.')
             limit = min(80,max(1,int(query.get('limit',80))))
             terms = query.get('q','').strip()[:500]
-            where, args = 'channel=?', [cid]
+            where, args = 'm.channel=?', [cid]
             if terms:
-                where += ' AND rowid IN (SELECT rowid FROM search WHERE search MATCH ?)'
-                args.append(' AND '.join('"'+t.replace('"','""')+'"' for t in terms.split()))
-            total = db.execute('SELECT count(*) FROM messages WHERE '+where,args).fetchone()[0]
+                where += ' AND m.rowid IN (SELECT rowid FROM search WHERE search MATCH ?)'
+                from .searching import match_text
+                args.append(match_text(terms,query.get('phrase')=='1'))
+            from .searching import metadata_filter
+            filters,values=metadata_filter(query,zip_index=True)
+            if filters:where+=' AND '+' AND '.join(filters);args+=values
+            base,base_args=where,list(args)
+            total = db.execute('SELECT count(*) FROM messages m WHERE '+where,args).fetchone()[0]
             reverse = False
             if query.get('before'):
                 where += ' AND seq<?'; args.append(int(query['before'])); reverse = True
@@ -379,24 +384,21 @@ class ZipReader:
                 row = db.execute('SELECT seq FROM messages WHERE channel=? AND id=?',(cid,query['message'])).fetchone()
                 if not row: raise ValueError('The referenced message is absent from this ZIP.')
                 where += ' AND seq>=?'; args.append(max(1,row['seq']-10))
-            elif query.get('day') and not terms:
+            elif query.get('day') and not terms and not any(query.get(k) for k in ('author','attachment','type','start','end')):
                 day = query['day']
                 datetime.strptime(day,'%Y-%m-%d')
                 hour = min(23,max(0,int(query.get('hour',0))))
                 where += ' AND (day>? OR (day=? AND hour>=?))'; args += [day,day,hour]
-            rows = list(db.execute('SELECT * FROM messages WHERE '+where+' ORDER BY seq '+('DESC' if reverse else 'ASC')+' LIMIT ?',args+[limit]))
+            rows = list(db.execute('SELECT m.* FROM messages m WHERE '+where+' ORDER BY seq '+('DESC' if reverse else 'ASC')+' LIMIT ?',args+[limit]))
             if reverse: rows.reverse()
             first, last = (rows[0]['seq'],rows[-1]['seq']) if rows else (0,0)
-            base, base_args = ('channel=?',[cid])
-            if terms:
-                base += ' AND rowid IN (SELECT rowid FROM search WHERE search MATCH ?)'; base_args.append(args[1])
-            before = bool(rows and db.execute('SELECT 1 FROM messages WHERE '+base+' AND seq<? LIMIT 1',base_args+[first]).fetchone())
-            after = bool(rows and db.execute('SELECT 1 FROM messages WHERE '+base+' AND seq>? LIMIT 1',base_args+[last]).fetchone())
+            before = bool(rows and db.execute('SELECT 1 FROM messages m WHERE '+base+' AND seq<? LIMIT 1',base_args+[first]).fetchone())
+            after = bool(rows and db.execute('SELECT 1 FROM messages m WHERE '+base+' AND seq>? LIMIT 1',base_args+[last]).fetchone())
             messages = [dict(json.loads(r['raw']),_seq=r['seq']) for r in rows]
             return {'generation':generation,'messages':messages,'total':total,'first':first,'last':last,'before':before,'after':after}
 
     def saved_messages(self, key, channel, ids):
-        entry=next((e for e in reader_library.entries(self.store) if e['id']==key),None)
+        entry=reader_library.entry(self.store,key)
         placeholders=','.join('?' for _ in ids)
         if entry:
             with self.store.db() as db:
@@ -411,8 +413,13 @@ class ZipReader:
     def saved_authors(self, key, channel, ids):
         return {mid:m.get('author') or {} for mid,m in self.saved_messages(key,channel,ids).items()}
 
+    def asset_location(self,key,asset_id):
+        if reader_library.entry(self.store,key):
+            return reader_library.asset_location(self.store,asset_id)
+        return None
+
     def asset(self, key, asset_id):
-        if any(e['id']==key for e in reader_library.entries(self.store)):
+        if reader_library.entry(self.store,key):
             return reader_library.asset(self.store,asset_id)
         if not re.fullmatch('[a-f0-9]{64}', str(asset_id)): raise ValueError('Invalid saved asset.')
         path, _, _ = self.index(key)
@@ -420,6 +427,18 @@ class ZipReader:
             row = db.execute('SELECT kind,data FROM assets WHERE id=?',(asset_id,)).fetchone()
         if not row: raise ValueError('This file was not included in the ZIP.')
         return row
+
+    def serve_asset(self,handler,key,asset_id):
+        from .local_media import send
+        location=self.asset_location(key,asset_id)
+        if location:return send(handler,location[0],path=location[1])
+        if not re.fullmatch('[a-f0-9]{64}',str(asset_id)):raise ValueError('Invalid saved asset.')
+        path,_,_=self.index(key)
+        with closing(sqlite3.connect(path)) as db:
+            row=db.execute('SELECT rowid,kind,length(data) FROM assets WHERE id=?',(asset_id,)).fetchone()
+            if not row:raise ValueError('This file was not included in the ZIP.')
+            with db.blobopen('assets','data',row[0],readonly=True) as stream:
+                send(handler,row[1],stream=stream,size=row[2])
 
 
 class AvatarsView:

@@ -95,14 +95,14 @@ class Handler(BaseHTTPRequestHandler):
     def send_headers(self, status=200, kind='application/json; charset=utf-8', extra=None, length=None):
         self.send_response(status)
         self.send_header('Content-Type', kind)
-        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Cache-Control', (extra or {}).get('Cache-Control','no-store'))
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Referrer-Policy', 'no-referrer')
         self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://cdn.discordapp.com https://media.discordapp.net; media-src 'self' https://cdn.discordapp.com https://media.discordapp.net; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'")
         if length is not None:
             self.send_header('Content-Length', str(length))
         for key, value in (extra or {}).items():
-            self.send_header(key, value)
+            if key!='Cache-Control':self.send_header(key, value)
         self.end_headers()
 
     def json(self, data, status=200, extra=None):
@@ -129,7 +129,7 @@ class Handler(BaseHTTPRequestHandler):
             route = urlparse(self.path)
             query = {k: v[-1] for k, v in parse_qs(route.query).items()}
             if route.path == '/api/health':
-                self.json({'app': 'Discord Archive Studio', 'version': '1.3.3','library_id':library_identity(self.server.store.root)})
+                self.json({'app': 'Discord Archive Studio', 'version': '1.4.0','library_id':library_identity(self.server.store.root)})
                 return
             if route.path in ('/', '/index.html', '/reader.html'):
                 payload = (self.server.web / ('reader.html' if route.path == '/reader.html' else 'index.html')).read_bytes()
@@ -154,9 +154,7 @@ class Handler(BaseHTTPRequestHandler):
             elif route.path in ('/api/reader/overview','/api/reader/calendar','/api/reader/messages'):
                 self.json(self.server.reader.query(query.get('archive',''),route.path.rsplit('/',1)[-1],query))
             elif route.path == '/api/reader/asset':
-                kind, payload = self.server.reader.asset(query.get('archive',''),query.get('id',''))
-                self.send_headers(kind=kind,length=len(payload),extra={'Content-Disposition':'attachment'} if kind=='application/octet-stream' else None)
-                self.wfile.write(payload)
+                self.server.reader.serve_asset(self,query.get('archive',''),query.get('id',''))
             elif re.fullmatch(r'/avatar/[a-f0-9]{64}',route.path):
                 digest = route.path.rsplit('/',1)[-1]
                 with self.server.store.db() as db:
@@ -166,28 +164,11 @@ class Handler(BaseHTTPRequestHandler):
                 payload = path.read_bytes()
                 self.send_headers(kind=row['kind'],length=len(payload)); self.wfile.write(payload)
             elif route.path == '/api/search':
-                result = self.server.store.search(query.get('q', ''), query.get('channel'), query.get('server'), query.get('person'), query.get('start'), query.get('end'), query.get('offset', 0), query.get('limit', 80))
-                attachment_ids = {str(a.get('id')) for m in result['messages'] for a in m.get('attachments', [])}
-                local = {}
-                if attachment_ids:
-                    with self.server.store.db() as db:
-                        for m in result['messages']:
-                            for a in m.get('attachments',[]):
-                                aid = str(a.get('id'))
-                                row = db.execute('SELECT * FROM media WHERE attachment_id=?',(aid,)).fetchone()
-                                task = db.execute('SELECT status,detail FROM media_requests WHERE attachment_id=?',(aid,)).fetchone()
-                                a['download_status'] = media_reason(a,media_limit(a,100),dict(row) if row else None) or (task['detail'] if task else 'Manual download only')
-                                if row and not media_reason(a,media_limit(a,100),dict(row)):
-                                    local[aid]='/media/'+row['hash']
-                result['media'] = local
-                from .avatars import avatar_key
-                cached = self.server.worker.exporter.avatars.cached()
-                for message in result['messages']:
-                    key = avatar_key(message.get('author',{}))
-                    if key and key[0] in cached: message['_avatar_url'] = '/avatar/'+cached[key[0]]['hash']
+                result = self.server.store.search(query.get('q', ''), query.get('channel'), query.get('server'), query.get('person'), query.get('start'), query.get('end'), query.get('offset', 0), query.get('limit', 80), query.get('attachment',''),query.get('type',''),query.get('phrase')=='1',query.get('cursor'))
+                self.decorate(result)
                 self.json(result)
             elif route.path == '/api/preview':
-                self.json(self.server.store.preview(query.get('channel',''),query.get('before'),query.get('limit',50)))
+                result=self.server.store.preview(query.get('channel',''),query.get('before'),query.get('limit',50));self.decorate(result);self.json(result)
             elif route.path == '/api/people':
                 owner=(self.server.connection.account or {}).get('id') or self.server.store.setting('account_id')
                 self.json(self.server.people.cached(owner))
@@ -200,7 +181,8 @@ class Handler(BaseHTTPRequestHandler):
                     revisions = [json.loads(r['raw']) for r in db.execute('SELECT raw FROM revisions WHERE message_id=? ORDER BY captured DESC', (mid,))]
                 if not row:
                     raise ValueError('This referenced message has not been captured in the library.')
-                self.json({'message':dict(json.loads(row['raw']),channel_name=row['name'],server_id=row['server_id']), 'revisions':revisions})
+                result={'messages':[dict(json.loads(row['raw']),channel_name=row['name'],server_id=row['server_id'])]};self.decorate(result)
+                self.json({'message':result['messages'][0], 'revisions':revisions,'media':result['media']})
             elif route.path == '/api/events':
                 self.events()
             elif re.fullmatch(r'/media/[a-f0-9]{64}', route.path):
@@ -211,14 +193,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not row or not path.is_file():
                     self.error('Attachment has not been saved.', 404)
                     return
-                kind = mimetypes.guess_type(row['filename'])[0] or 'application/octet-stream'
-                active = kind in ('text/html', 'image/svg+xml', 'application/javascript')
-                self.send_headers(kind='application/octet-stream' if active else kind,
-                             extra={'Content-Disposition': 'attachment'} if active else None, length=path.stat().st_size)
-                with path.open('rb') as source:
-                    while block := source.read(256*1024):
-                        self.wfile.write(block)
-            elif route.path in ('/app.js', '/style.css', '/server-picker.js', '/queue.js', '/queue-settings.js', '/people.js', '/archives.js', '/reader.js', '/reader.css', '/avatar-cache.js', '/emoji-cache.js', '/emoji-library.js'):
+                from .local_media import mime,send
+                send(self,mime(row['filename']),path=path)
+            elif route.path in ('/app.js', '/style.css', '/server-picker.js', '/queue.js', '/queue-settings.js', '/people.js', '/archives.js', '/reader.js', '/reader.css', '/avatar-cache.js', '/emoji-cache.js', '/emoji-library.js','/chat-buffer.js','/media-view.js','/midi-player.js','/enhancements.css','/library-scroll.js','/sounds.js'):
                 path = self.server.web / route.path.lstrip('/')
                 payload = path.read_bytes()
                 self.send_headers(kind='text/javascript; charset=utf-8' if path.suffix=='.js' else 'text/css; charset=utf-8', length=len(payload))
@@ -229,6 +206,30 @@ class Handler(BaseHTTPRequestHandler):
             pass
         except Exception as error:
             self.error(error)
+
+    def do_HEAD(self):
+        # The streaming routes use the same validation and metadata as GET.
+        if self.path.startswith(('/media/','/api/reader/asset')):
+            self.do_GET()
+        else:self.send_headers(405,length=0)
+
+    def decorate(self,result):
+        from .avatars import avatar_key
+        cached=self.server.worker.exporter.avatars.cached()
+        local={}
+        with self.server.store.db() as db:
+            for message in result['messages']:
+                key=avatar_key(message.get('author',{}))
+                if key and key[0] in cached:message['_avatar_url']='/avatar/'+cached[key[0]]['hash']
+                for attachment in message.get('attachments',[]):
+                    aid=str(attachment.get('id'))
+                    row=db.execute('SELECT * FROM media WHERE attachment_id=?',(aid,)).fetchone()
+                    task=db.execute('SELECT status,detail FROM media_requests WHERE attachment_id=?',(aid,)).fetchone()
+                    reason=media_reason(attachment,media_limit(attachment,100),dict(row) if row else None)
+                    attachment['download_status']=reason or (task['detail'] if task else 'Manual download only')
+                    if row and not reason and (self.server.store.root/row['relative_path']).is_file():
+                        local[aid]='/media/'+row['hash']
+        result['media']=local
 
     def events(self):
         self.send_headers(kind='text/event-stream', extra={'X-Accel-Buffering': 'no'})

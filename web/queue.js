@@ -1,46 +1,44 @@
 'use strict';
-let draggedJob=null,queuePointer=null,queueMovePending=false;
+let draggedJob=null,queuePointer=null,queueMovePending=false,queueFrame=0,queueSuppressClick=false;
 const queueSpaceObserver=new ResizeObserver(()=>document.documentElement.style.setProperty('--queue-space',Math.ceil($('queue-tray').getBoundingClientRect().height+24)+'px'));
 queueSpaceObserver.observe($('queue-tray'));
-function clearQueueGesture(){
-  document.querySelectorAll('.dragging,.drop-before,.drop-after').forEach(e=>e.classList.remove('dragging','drop-before','drop-after'));
-  draggedJob=null;queuePointer=null;document.body.classList.remove('queue-dragging');queueSignature='';if(state)renderQueue();
+const queueAnnouncement=document.createElement('div');queueAnnouncement.className='sr-only';queueAnnouncement.setAttribute('aria-live','polite');document.body.append(queueAnnouncement);
+const queueHint=document.createElement('p');queueHint.className='queue-reorder-hint';queueHint.textContent='Drag a waiting task to rearrange. Keyboard: focus its grip, press Space, use ↑ / ↓, then Enter. Escape cancels.';$('queue-detail').before(queueHint);
+function movable(id){const job=state?.queue.find(j=>j.id===id);return !!job&&job.id!==state.processing_job&&['queued','paused','waiting','blocked'].includes(job.status);}
+function clearQueueGesture(render=true){cancelAnimationFrame(queueFrame);queuePointer?.ghost?.remove();document.querySelectorAll('.queue-placeholder,.queue-keyboard-picked').forEach(el=>el.classList.remove('queue-placeholder','queue-keyboard-picked'));draggedJob=null;queuePointer=null;document.body.classList.remove('queue-dragging');queueSignature='';if(render&&state)renderQueue();}
+async function moveQueueTask(id,before){queueMovePending=true;try{await api('reorder',{id,before});applyState(await api('state'));queueAnnouncement.textContent='Queue order saved.';StudioSounds.play('drop');toast('Queue order saved.');}catch(error){toast(error.message,true);}finally{queueMovePending=false;queueSignature='';if(state)renderQueue();document.querySelector('#queue-detail [data-queue-job="'+CSS.escape(id)+'"] .drag-handle')?.focus({preventScroll:true});}}
+function arrange(gesture,before){
+  if(before===gesture.before)return;gesture.before=before;
+  const rows=[...gesture.container.querySelectorAll('[data-queue-job]')],rects=new Map(rows.map(row=>[row,row.getBoundingClientRect().top]));
+  const ids=rows.filter(row=>row.dataset.movable==='true').map(row=>row.dataset.queueJob).filter(id=>id!==gesture.id);ids.splice(before?ids.indexOf(before):ids.length,0,gesture.id);
+  const nodes=new Map(rows.map(row=>[row.dataset.queueJob,row]));let i=0;
+  for(const row of rows)gesture.container.append(row.dataset.movable==='true'?nodes.get(ids[i++]):row);
+  if(!matchMedia('(prefers-reduced-motion: reduce)').matches)for(const row of rows){const delta=rects.get(row)-row.getBoundingClientRect().top;if(delta)row.animate([{transform:'translateY('+delta+'px)'},{transform:'translateY(0)'}],{duration:160,easing:'ease-out'});}
 }
-async function moveQueueTask(id,before){
-  queueMovePending=true;
-  try{await api('reorder',{id,before});applyState(await api('state'));toast('Queue order saved.');}
-  catch(error){toast(error.message,true);}
-  finally{queueMovePending=false;queueSignature='';if(state)renderQueue();}
+function dragTick(){
+  const gesture=queuePointer;if(!gesture?.moved||gesture.keyboard)return;
+  if(!movable(gesture.id)){queueAnnouncement.textContent='Task started exporting. Reorder cancelled.';clearQueueGesture();return;}
+  const box=gesture.container.getBoundingClientRect(),tray=$('queue-tray').getBoundingClientRect(),bottom=Math.min(box.bottom,innerHeight,gesture.container.id==='queue-detail'&&tray.height&&tray.top>box.top?tray.top-6:innerHeight),rect={left:box.left,right:box.right,top:Math.max(0,box.top),bottom,height:Math.max(1,bottom-Math.max(0,box.top))};gesture.ghost.style.left=Math.max(8,Math.min(innerWidth-gesture.ghost.offsetWidth-8,gesture.x-gesture.dx))+'px';gesture.ghost.style.top=(gesture.y-gesture.dy)+'px';
+  const inside=gesture.x>=rect.left&&gesture.x<=rect.right&&gesture.y>=rect.top&&gesture.y<=rect.bottom;gesture.allowed=inside;
+  if(inside){const edge=Math.min(65,rect.height/4),speed=gesture.y<rect.top+edge?-Math.ceil((rect.top+edge-gesture.y)/edge*14):gesture.y>rect.bottom-edge?Math.ceil((gesture.y-rect.bottom+edge)/edge*14):0;gesture.container.scrollTop+=speed;
+    const row=document.elementFromPoint(gesture.x,gesture.y)?.closest('[data-queue-job]');if(row&&row.dataset.queueJob!==gesture.id&&row.dataset.movable==='true'&&movable(row.dataset.queueJob)){const box=row.getBoundingClientRect(),after=gesture.y>box.top+box.height/2;const rows=[...gesture.container.querySelectorAll('[data-queue-job]')].filter(r=>r.dataset.movable==='true'&&r.dataset.queueJob!==gesture.id);arrange(gesture,after?rows[rows.indexOf(row)+1]?.dataset.queueJob||null:row.dataset.queueJob);}
+    else if(row?.dataset.movable==='false')gesture.allowed=false;
+    else if(!row){const rows=[...gesture.container.querySelectorAll('[data-queue-job]')].filter(r=>r.dataset.movable==='true'&&r.dataset.queueJob!==gesture.id);if(gesture.y<rows[0]?.getBoundingClientRect().top)arrange(gesture,rows[0].dataset.queueJob);else if(gesture.y>rows.at(-1)?.getBoundingClientRect().bottom)arrange(gesture,null);}
+  }
+  gesture.ghost.style.borderColor=gesture.allowed?'var(--accent)':'var(--danger)';queueFrame=requestAnimationFrame(dragTick);
 }
 for(const container of [$('queue-detail'),$('tray-jobs')]){
-  container.addEventListener('pointerdown',event=>{
-    const handle=event.target.closest('.drag-handle'),row=event.target.closest('[data-queue-job]');
-    if(!row||row.dataset.movable!=='true'||queueMovePending||event.button!==0)return;
-    if(!handle&&event.target.closest('button,input,select,textarea,a,label,[contenteditable]'))return;
-    if(handle)event.preventDefault();row.setPointerCapture(event.pointerId);
-    draggedJob=row.dataset.queueJob;queuePointer={id:draggedJob,x:event.clientX,y:event.clientY,moved:false,allowed:false,before:null,pointer:event.pointerId};
+  container.addEventListener('pointerdown',event=>{const row=event.target.closest('[data-queue-job]'),handle=event.target.closest('.drag-handle');if(!row||!movable(row.dataset.queueJob)||queueMovePending||event.button!==0)return;if(!handle&&event.target.closest('button,input,select,textarea,a,label,[contenteditable]'))return;if(queuePointer)clearQueueGesture();if(handle)event.preventDefault();row.setPointerCapture(event.pointerId);const rect=row.getBoundingClientRect();draggedJob=row.dataset.queueJob;queuePointer={id:draggedJob,row,container,x:event.clientX,y:event.clientY,startX:event.clientX,startY:event.clientY,dx:event.clientX-rect.left,dy:event.clientY-rect.top,pointer:event.pointerId,before:undefined,allowed:false,moved:false};});
+  container.addEventListener('keydown',event=>{const handle=event.target.closest('.drag-handle'),row=handle?.closest('[data-queue-job]');if(!row||queueMovePending||!movable(row.dataset.queueJob))return;
+    if(!queuePointer&&[' ','Enter'].includes(event.key)){event.preventDefault();draggedJob=row.dataset.queueJob;queuePointer={id:draggedJob,row,container,keyboard:true,before:undefined};row.classList.add('queue-keyboard-picked');handle.setAttribute('aria-pressed','true');queueAnnouncement.textContent='Task picked up. Use arrow keys, Enter to save, Escape to cancel.';}
+    else if(queuePointer?.keyboard){const gesture=queuePointer;if(['ArrowUp','ArrowDown'].includes(event.key)){event.preventDefault();const rows=[...container.querySelectorAll('[data-queue-job]')].filter(r=>r.dataset.movable==='true'),index=rows.indexOf(row),target=index+(event.key==='ArrowUp'?-1:1);if(target<0||target>=rows.length)return;arrange(gesture,event.key==='ArrowUp'?rows[target].dataset.queueJob:rows[target+1]?.dataset.queueJob||null);handle.focus({preventScroll:true});row.scrollIntoView({block:'nearest'});queueAnnouncement.textContent='Position '+(target+1)+' of '+rows.length;}
+      else if(['Enter',' '].includes(event.key)){event.preventDefault();const before=gesture.before;clearQueueGesture(false);if(before!==undefined)moveQueueTask(gesture.id,before);else renderQueue();}}
   });
 }
-document.addEventListener('pointermove',event=>{
-  const gesture=queuePointer;if(!gesture||event.pointerId!==gesture.pointer)return;
-  if(!gesture.moved&&Math.hypot(event.clientX-gesture.x,event.clientY-gesture.y)<5)return;
-  event.preventDefault();
-  gesture.moved=true;document.body.classList.add('queue-dragging');
-  document.querySelectorAll('[data-queue-job]').forEach(row=>row.classList.toggle('dragging',row.dataset.queueJob===draggedJob));
-  document.querySelectorAll('.drop-before,.drop-after').forEach(e=>e.classList.remove('drop-before','drop-after'));
-  const hit=document.elementFromPoint(event.clientX,event.clientY),container=hit?.closest('#queue-detail,#tray-jobs'),row=hit?.closest('[data-queue-job]');
-  gesture.allowed=!!container&&row?.dataset.movable!=='false';gesture.before=null;
-  if(!gesture.allowed)return;
-  if(container){const rect=container.getBoundingClientRect();if(event.clientY<rect.top+30)container.scrollTop-=12;else if(event.clientY>rect.bottom-30)container.scrollTop+=12;}
-  if(row){
-    gesture.before=row.dataset.queueJob;
-    const after=event.clientY>=row.getBoundingClientRect().top+row.getBoundingClientRect().height/2;
-    if(after){let next=row.nextElementSibling;while(next&&(next.dataset.movable!=='true'||next.dataset.queueJob===draggedJob))next=next.nextElementSibling;gesture.before=next?.dataset.queueJob||null;}
-    if(row.dataset.queueJob!==draggedJob)row.classList.add(after?'drop-after':'drop-before');
-  }
-});
-document.addEventListener('pointerup',event=>{
-  const gesture=queuePointer;if(!gesture||gesture.pointer!==event.pointerId)return;
-  clearQueueGesture();if(gesture.moved&&gesture.allowed&&gesture.before!==gesture.id)moveQueueTask(gesture.id,gesture.before);
-});
+document.addEventListener('pointermove',event=>{const gesture=queuePointer;if(!gesture||gesture.keyboard||event.pointerId!==gesture.pointer)return;gesture.x=event.clientX;gesture.y=event.clientY;if(!gesture.moved&&Math.hypot(gesture.x-gesture.startX,gesture.y-gesture.startY)<6)return;event.preventDefault();if(!gesture.moved){gesture.moved=true;StudioSounds.play('drag');gesture.ghost=gesture.row.cloneNode(true);gesture.ghost.className+=' queue-ghost';gesture.ghost.removeAttribute('data-queue-job');gesture.ghost.setAttribute('aria-hidden','true');gesture.ghost.style.width=gesture.row.getBoundingClientRect().width+'px';document.body.append(gesture.ghost);gesture.row.classList.add('queue-placeholder');document.body.classList.add('queue-dragging');queueAnnouncement.textContent='Rearranging task.';queueFrame=requestAnimationFrame(dragTick);}});
+document.addEventListener('pointerup',event=>{const gesture=queuePointer;if(!gesture||gesture.keyboard||gesture.pointer!==event.pointerId)return;queueSuppressClick=gesture.moved;const commit=gesture.moved&&gesture.allowed&&gesture.before!==undefined&&movable(gesture.id);clearQueueGesture(!commit);if(commit)moveQueueTask(gesture.id,gesture.before);setTimeout(()=>queueSuppressClick=false,0);});
+document.addEventListener('click',event=>{if(queueSuppressClick){event.preventDefault();event.stopImmediatePropagation();}},{capture:true});
 document.addEventListener('pointercancel',()=>{if(queuePointer)clearQueueGesture();});
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&queuePointer){event.preventDefault();queueAnnouncement.textContent='Reorder cancelled.';clearQueueGesture();}});
+window.addEventListener('blur',()=>{if(queuePointer)clearQueueGesture();});
+

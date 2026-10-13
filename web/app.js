@@ -11,12 +11,13 @@ let cooldownTimer;
 let theme=localStorage.getItem('studio.theme')||'midnight';
 const systemTheme=matchMedia('(prefers-color-scheme: light)');
 function applyTheme(value){
-  theme=['midnight','light','contrast','system'].includes(value)?value:'midnight';
+  theme=['midnight','light','contrast','system','graphite','ocean','forest','rose','sepia'].includes(value)?value:'midnight';
   document.documentElement.dataset.theme=theme==='system'?(systemTheme.matches?'light':'midnight'):theme;
   localStorage.setItem('studio.theme',theme);
   $('theme-select').value=theme;
 }
 systemTheme.addEventListener('change',()=>{if(theme==='system')applyTheme(theme);});
+window.addEventListener('storage',event=>{if(event.key==='studio.theme')applyTheme(event.newValue);});
 const pending = new Set();
 const messageMap = new Map();
 const selectedMedia = new Map();
@@ -159,7 +160,7 @@ function jobHTML(job, history=false) {
     (['queued','paused','waiting','blocked'].includes(job.status)?`<button data-job="${esc(job.id)}" data-action="up" title="Move earlier">↑</button><button data-job="${esc(job.id)}" data-action="down" title="Move later">↓</button>`:'')+
     `<button data-job="${esc(job.id)}" data-action="cancel" title="Remove task; keep captured messages">×</button>`;
   const movable=!history&&job.id!==state.processing_job&&['queued','paused','waiting','blocked'].includes(job.status);
-  return `<div class="job-row ${esc(job.status)}" ${history?'':`data-queue-job="${esc(job.id)}" data-movable="${movable}"`}><div class="job-label">${movable?'<span class="drag-handle" draggable="false" title="Drag to reorder; arrows also move this task" aria-label="Drag task">⠿</span>':''}${history?'':`<input class="queue-select" type="checkbox" data-select-queue="${esc(job.id)}" aria-label="Select ${esc(job.channel_name)}" ${movable&&job.owner_id===state.settings_owner?'':'disabled'} ${typeof queueSelection!=='undefined'&&queueSelection.has(job.id)?'checked':''}>`}<strong>${esc(job.server_name)} <span class="muted"># ${esc(job.channel_name)}</span></strong><small>${job.options.formats.map(x=>x.toUpperCase()).join(' · ')} · ${number(job.options.batch_messages)} per batch · ${duration(job.options.cooldown_minutes)} rest</small></div><div class="job-progress"><div class="progress-track"><div class="progress-fill"></div></div><div class="job-state"><span class="job-detail" title="${esc(job.detail)}"><span class="status-label">${esc(job.status)}</span> · ${esc(job.detail||'Ready to begin')}</span><span>${number(job.progress)} scanned</span></div></div><div class="job-controls">${controls}</div></div>`;
+  return `<div class="job-row ${esc(job.status)}" ${history?'':`data-queue-job="${esc(job.id)}" data-movable="${movable}"`}><div class="job-label">${movable?'<span class="drag-handle" role="button" tabindex="0" draggable="false" title="Drag to reorder; arrows also move this task" aria-label="Drag task">⠿</span>':''}${history?'':`<input class="queue-select" type="checkbox" data-select-queue="${esc(job.id)}" aria-label="Select ${esc(job.channel_name)}" ${movable&&job.owner_id===state.settings_owner?'':'disabled'} ${typeof queueSelection!=='undefined'&&queueSelection.has(job.id)?'checked':''}>`}<strong>${esc(job.server_name)} <span class="muted"># ${esc(job.channel_name)}</span></strong><small>${job.options.formats.map(x=>x.toUpperCase()).join(' · ')} · ${number(job.options.batch_messages)} per batch · ${duration(job.options.cooldown_minutes)} rest</small></div><div class="job-progress"><div class="progress-track"><div class="progress-fill"></div></div><div class="job-state"><span class="job-detail" title="${esc(job.detail)}"><span class="status-label">${esc(job.status)}</span> · ${esc(job.detail||'Ready to begin')}</span><span>${number(job.progress)} scanned</span></div></div><div class="job-controls">${controls}</div></div>`;
 }
 function renderQueue() {
   const signature=JSON.stringify([state.queue,state.history,state.schedules,state.publications,state.processing_job]);
@@ -252,7 +253,7 @@ function attachmentHTML(a, local, messageId) {
   const path=local?.[String(a.id)]; const original=safeLink(a.url);const image=path&&((a.content_type||'').startsWith('image/')||/\.(png|jpe?g|gif|webp)$/i.test(a.filename||''));
   const video=(a.content_type||'').startsWith('video/')||/\.(mp4|webm|mov|m4v|avi|mkv|mpeg|mpg|wmv|3gp)$/i.test(a.filename||'');
   const oversized=video&&Number(a.size)>10000000;
-  return `<div class="attachment"><label>${!path&&a.id&&original?`<input type="checkbox" data-media-id="${esc(a.id)}" data-media-message="${esc(messageId)}" ${selectedMedia.has(String(a.id))?'checked':''} ${oversized?'disabled':''}> `:''}📎 ${esc(a.filename||a.fileName||'Attachment')} <small class="muted">${a.size?(Number(a.size)/1000000).toFixed(2)+' MB':'size unknown'}</small></label>${image?`<img src="${esc(path)}" alt="${esc(a.filename)}" loading="lazy">`:''}${path?` <a href="${esc(path)}" target="_blank" rel="noopener">Open saved file ↗</a>`:` <span class="muted">${esc(oversized?'Skipped: video exceeds 10 MB':a.download_status||'Manual download only')}</span>`}</div>`;
+  return `<div class="attachment"><label>${!path&&a.id&&original?`<input type="checkbox" data-media-id="${esc(a.id)}" data-media-message="${esc(messageId)}" ${selectedMedia.has(String(a.id))?'checked':''} ${oversized?'disabled':''}> `:''}📎 ${esc(a.filename||a.fileName||'Attachment')} <small class="muted">${a.size?(Number(a.size)/1000000).toFixed(2)+' MB':'size unknown'}</small></label>${path?MediaView.html(a,path):''}${path?` <a href="${esc(path)}" target="_blank" rel="noopener">Open saved file ↗</a>`:` <span class="muted">${esc(oversized?'Skipped: video exceeds 10 MB':a.download_status||'Manual download only')}</span>`}</div>`;
 }
 function previewMediaHTML(m){
   return (m.attachments||[]).map(a=>`<div class="preview-attachment">📎 ${esc(a.filename||a.fileName||'Attachment')}${a.size?` <span class="muted">${(Number(a.size)/1000000).toFixed(2)} MB</span>`:''}</div>`).join('')+(m.embeds||[]).map(e=>`<div class="preview-attachment">${StudioEmoji.html(String(e.title||e.description||'Embedded content').slice(0,500))}</div>`).join('');
@@ -262,12 +263,12 @@ function messageHTML(m, local, small=false) {
   const author=m.author?.global_name||m.author?.nickname||m.author?.username||m.author?.name||'Unknown';
   const initial=Array.from(author).slice(0,2).join('').toUpperCase();
   const avatar=/^\/avatar\/[a-f0-9]{64}$/.test(m._avatar_url||'')?`<img src="${esc(m._avatar_url)}" alt="${esc(initial)}" loading="lazy" width="40" height="40">`:esc(initial);
-  return `<article class="message" data-message-id="${esc(m.id)}"><div class="avatar">${avatar}</div><div class="message-body"><div class="message-header"><span class="message-author">${esc(author)}</span><time class="message-time">${esc(new Date(m.timestamp).toLocaleString())}${m.edited_timestamp?' · edited':''}</time>${m.channel_name?`<span class="message-channel"># ${esc(m.channel_name)}</span>`:''}</div>${m.message_reference?.message_id?`<button class="message-reply subtle" data-reply="${esc(m.message_reference.message_id)}">↩ Reply to message ${esc(m.message_reference.message_id)}</button>`:''}<div class="message-content">${contentHTML(m.content||'')}</div>${small?previewMediaHTML(m):(m.attachments||[]).map(a=>attachmentHTML(a,local,m.id)).join('')}${small?'':(m.embeds||[]).map(e=>`<div class="embed"><strong>${StudioEmoji.html(e.title||'')}</strong><div>${StudioEmoji.html(e.description||'')}</div></div>`).join('')}${m.reactions?.length?`<div class="reactions">${m.reactions.map(r=>`<span class="reaction">${StudioEmoji.reaction(r.emoji)} ${number(r.count)}</span>`).join('')}</div>`:''}<div class="message-actions"><button data-copy-message="${esc(m.id)}">Copy text</button><button data-details="${esc(m.id)}">Details · ${esc(m.author?.id)}</button></div></div></article>`;
+  return `<article class="message" data-message-id="${esc(m.id)}"><div class="avatar">${avatar}</div><div class="message-body"><div class="message-header"><span class="message-author">${esc(author)}</span><time class="message-time">${esc(new Date(m.timestamp).toLocaleString())}${m.edited_timestamp?' · edited':''}</time>${m.channel_name?`<span class="message-channel"># ${esc(m.channel_name)}</span>`:''}</div>${m.message_reference?.message_id?`<button class="message-reply subtle" data-reply="${esc(m.message_reference.message_id)}">↩ Reply to message ${esc(m.message_reference.message_id)}</button>`:''}<div class="message-content">${contentHTML(m.content||'')}</div>${(m.attachments||[]).map(a=>attachmentHTML(a,local,m.id)).join('')}${small?'':(m.embeds||[]).map(e=>`<div class="embed"><strong>${StudioEmoji.html(e.title||'')}</strong><div>${StudioEmoji.html(e.description||'')}</div></div>`).join('')}${m.reactions?.length?`<div class="reactions">${m.reactions.map(r=>`<span class="reaction">${StudioEmoji.reaction(r.emoji)} ${number(r.count)}</span>`).join('')}</div>`:''}<div class="message-actions"><button data-copy-message="${esc(m.id)}">Copy text</button><button data-details="${esc(m.id)}">Details · ${esc(m.author?.id)}</button></div></div></article>`;
 }
 async function searchLibrary() {
   if(!state)return;
   searchAbort?.abort();searchAbort=new AbortController();
-  const query=new URLSearchParams({q:$('library-search').value,server:$('library-server').value,channel:$('library-channel').value,person:$('library-person').value,start:$('library-start').value,end:$('library-end').value,offset,limit:80});
+  const query=new URLSearchParams({q:$('library-search').value,server:$('library-server').value,channel:$('library-channel').value,person:$('library-person').value,attachment:$('library-attachment').value,type:$('library-type').value,phrase:$('library-phrase').checked?'1':'',start:$('library-start').value,end:$('library-end').value,offset,limit:80});
   try {results=await api('search?'+query.toString(),undefined,searchAbort.signal);renderResults();$('library-updates').hidden=true;}
   catch(error){if(error.name!=='AbortError')toast(error.message,true);}
 }
@@ -301,7 +302,7 @@ async function loadUsers() {
   try {const users=await api('users');replaceSelect($('alias-user'),users.map(u=>({id:u.id,name:`${u.name} · ${u.id}`})),$('alias-user').value,'Choose an archived person…');replaceSelect($('alias-target'),users.map(u=>({id:u.id,name:`${u.name} · ${u.id}`})),$('alias-target').value,'Choose an archived person…');$('alias-list').textContent=users.filter(u=>u.person_id).map(u=>`${u.name} (${u.id}) → ${u.person_id}`).join('\n')||'No cross-account links.';}catch(e){toast(e.message,true);}
 }
 function applyState(value) {
-  const was=state;state=value;
+  const was=state;state=value;StudioSounds.update(value,was);
   if(was&&currentPage==='library'&&JSON.stringify(was.channels.map(c=>[c.id,c.generation]))!==JSON.stringify(value.channels.map(c=>[c.id,c.generation])))$('library-updates').hidden=false;
   if(!was){$('destination').value=value.destination;setIntervalMinutes(1440);}
   if(!was&&currentPage==='library')searchLibrary();
@@ -347,7 +348,7 @@ document.addEventListener('click',event=>{
   if(button.dataset.cancelMedia)busy(button,()=>api('media/cancel',{id:button.dataset.cancelMedia}));
   if(button.dataset.libraryTab){libraryTab=button.dataset.libraryTab;document.querySelectorAll('[data-library-tab]').forEach(x=>x.classList.toggle('active',x===button));renderResults();}
   if(button.dataset.copyMessage)busy(button,async()=>{await navigator.clipboard.writeText(messageMap.get(button.dataset.copyMessage)?.content||'');toast('Message text copied.');});
-  if(button.dataset.details||button.dataset.reply)busy(button,async()=>{const value=await api('message?'+new URLSearchParams({id:button.dataset.details||button.dataset.reply}));$('message-details').innerHTML=messageHTML(value.message,results.media)+`<pre>${esc(JSON.stringify(value.message,null,2))}</pre>`+(value.revisions.length?`<details><summary>${value.revisions.length} captured prior versions</summary>${value.revisions.map(m=>`<pre>${esc(JSON.stringify(m,null,2))}</pre>`).join('')}</details>`:'');if(!$('message-dialog').open)$('message-dialog').showModal();});
+  if(button.dataset.details||button.dataset.reply)busy(button,async()=>{const value=await api('message?'+new URLSearchParams({id:button.dataset.details||button.dataset.reply}));$('message-details').innerHTML=messageHTML(value.message,value.media)+`<pre>${esc(JSON.stringify(value.message,null,2))}</pre>`+(value.revisions.length?`<details><summary>${value.revisions.length} captured prior versions</summary>${value.revisions.map(m=>`<pre>${esc(JSON.stringify(m,null,2))}</pre>`).join('')}</details>`:'');if(!$('message-dialog').open)$('message-dialog').showModal();});
 });
 document.addEventListener('change',event=>{
   const input=event.target;
@@ -386,9 +387,9 @@ $('auto-connect').onchange=()=>api('settings',{auto_connect:$('auto-connect').ch
 $('pair-browser').onclick=()=>busy($('pair-browser'),async()=>{const result=await api('pair-code',{});$('pair-code').textContent=result.code;toast('Code expires in 10 minutes. Paste it in the connector popup.');});
 $('link-person').onclick=()=>busy($('link-person'),async()=>{await api('alias',{user_id:$('alias-user').value,person_id:$('alias-target').value});await loadUsers();toast('Accounts linked. Search either ID to see the person’s messages.');});
 $('unlink-person').onclick=()=>busy($('unlink-person'),async()=>{await api('alias',{user_id:$('alias-user').value});await loadUsers();toast('Account link removed.');});
-['library-search','library-person','library-start','library-end'].forEach(id=>$(id).addEventListener('input',()=>{offset=0;clearTimeout(searchTimer);searchTimer=setTimeout(searchLibrary,180);}));
+['library-search','library-person','library-attachment','library-type','library-phrase','library-start','library-end'].forEach(id=>$(id).addEventListener('input',()=>{offset=0;clearTimeout(searchTimer);searchTimer=setTimeout(searchLibrary,180);}));
 $('library-server').onchange=()=>{updateLibraryChannels();offset=0;searchLibrary();};$('library-channel').onchange=()=>{offset=0;searchLibrary();};
-$('clear-library').onclick=()=>{['library-search','library-person','library-start','library-end','library-server','library-channel'].forEach(id=>$(id).value='');updateLibraryChannels();offset=0;searchLibrary();};
+$('clear-library').onclick=()=>{['library-search','library-person','library-attachment','library-type','library-start','library-end','library-server','library-channel'].forEach(id=>$(id).value='');$('library-phrase').checked=false;updateLibraryChannels();offset=0;searchLibrary();};
 $('next-page').onclick=()=>{offset+=80;searchLibrary();};$('previous-page').onclick=()=>{offset=Math.max(0,offset-80);searchLibrary();};$('library-updates').onclick=searchLibrary;
 $('import-button').onclick=()=>$('import-files').click();$('import-files').onchange=()=>importFiles(Array.from($('import-files').files));
 document.addEventListener('dragover',e=>{if(e.dataTransfer.types.includes('Files')){e.preventDefault();document.body.classList.add('drop-active');}});

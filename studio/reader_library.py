@@ -20,6 +20,14 @@ def entries(store):
                      path=str(store.path),available=True,size=store.path.stat().st_size) for r in rows]
 
 
+def entry(store,key):
+    # Asset requests do not need to recount every saved message.
+    with store.db() as db:rows=db.execute('SELECT id,name FROM servers').fetchall()
+    for row in rows:
+        if library_id(row['id'])==key:return {'id':key,'server_id':row['id'],'name':'Saved library · '+row['name'],'source':'library','path':str(store.path),'available':True,'size':store.path.stat().st_size}
+    return None
+
+
 def cursor(row):
     return base64.urlsafe_b64encode(packed([row['timestamp'],len(row['id']),row['id']]).encode()).decode()
 
@@ -68,7 +76,8 @@ def query(store, entry, kind, params, avatars):
         terms=params.get('q','').strip()[:500]
         base,args='m.channel_id=?',[cid]
         if terms:
-            match=' AND '.join('"'+t.replace('"','""')+'"' for t in terms.split())
+            from .searching import match_text
+            match=match_text(terms,params.get('phrase')=='1')
             like='%'+terms.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
             authors=[r[0] for r in db.execute("SELECT id FROM users WHERE name LIKE ? ESCAPE '\\' LIMIT 1000",(like,))]
             if authors:
@@ -76,6 +85,13 @@ def query(store, entry, kind, params, avatars):
                 args += [match,*authors]
             else:
                 base+=' AND m.rowid IN (SELECT rowid FROM message_fts WHERE message_fts MATCH ?)';args.append(match)
+        from .searching import metadata_filter,backfill,match_text
+        if params.get('phrase')=='1' and terms:
+            args[0]=cid
+            if len(args)>1:args[1]=match_text(terms,True)
+        filters,values=metadata_filter(params)
+        if filters:
+            backfill(db,cid);base+=' AND '+' AND '.join(filters);args+=values
         total=db.execute('SELECT count(*) FROM messages m WHERE '+base,args).fetchone()[0]
         where,values=base,list(args);reverse=False
         if params.get('before') or params.get('after'):
@@ -86,7 +102,7 @@ def query(store, entry, kind, params, avatars):
             row=db.execute('SELECT * FROM messages WHERE channel_id=? AND id=?',(cid,str(params['message']))).fetchone()
             if not row:raise ValueError('The referenced message has not been saved in this channel.')
             where+=' AND (m.timestamp,length(m.id),m.id)>=(?,?,?)';values += [row['timestamp'],len(row['id']),row['id']]
-        elif params.get('day') and not terms:
+        elif params.get('day') and not terms and not any(params.get(k) for k in ('author','attachment','type','start','end')):
             hour=min(23,max(0,int(params.get('hour',0))))
             start=datetime.strptime(params['day'],'%Y-%m-%d').replace(hour=hour,tzinfo=timezone.utc)
             where+=' AND m.timestamp>=? AND julianday(m.timestamp)>=julianday(?)'
@@ -115,14 +131,22 @@ def query(store, entry, kind, params, avatars):
             'first':cursor(rows[0]) if rows else '', 'last':cursor(rows[-1]) if rows else ''}
 
 
-def asset(store, asset_id):
+def asset_location(store, asset_id):
     if not re.fullmatch('[a-f0-9]{64}',str(asset_id)):raise ValueError('Invalid saved file.')
     with store.db() as db:
         avatar=db.execute('SELECT kind FROM avatars WHERE hash=? LIMIT 1',(asset_id,)).fetchone()
-        media=db.execute('SELECT relative_path FROM media WHERE hash=? LIMIT 1',(asset_id,)).fetchone()
+        media=db.execute('SELECT relative_path,filename FROM media WHERE hash=? LIMIT 1',(asset_id,)).fetchone()
     path=store.root/'avatars'/asset_id if avatar else store.root/media['relative_path'] if media else None
     if not path or not path.is_file():raise ValueError('This file is not saved in the working library.')
-    if path.stat().st_size>10_000_000:raise ValueError('This file exceeds the reader preview cap.')
-    raw=path.read_bytes()
-    from .avatars import image_kind
-    return image_kind(raw) or 'application/octet-stream',raw
+    if path.stat().st_size>100_000_000:raise ValueError('This file exceeds the reader preview cap.')
+    if not path.resolve().is_relative_to(store.root.resolve()):raise ValueError('Invalid local media path.')
+    from .local_media import mime
+    with path.open('rb') as source:head=source.read(32)
+    kind=mime(media['filename'] if media else '',head)
+    if kind.startswith('video/') and path.stat().st_size>10_000_000:raise ValueError('Video exceeds the 10 MB preview cap.')
+    return kind,path
+
+
+def asset(store, asset_id):
+    kind,path=asset_location(store,asset_id)
+    return kind,path.read_bytes()

@@ -13,7 +13,7 @@ import zipfile
 ROOT=Path(__file__).resolve().parents[1]
 parser=argparse.ArgumentParser()
 parser.add_argument('--python-runtime',type=Path,default=Path(sys.executable).parent)
-parser.add_argument('--version',default='1.3.3')
+parser.add_argument('--version',default='1.4.0')
 args=parser.parse_args()
 runtime=args.python_runtime.resolve()
 out=(ROOT/'outputs').resolve()
@@ -72,7 +72,7 @@ for source in package.rglob('*'):
 with zipfile.ZipFile(portable_zip,'w',zipfile.ZIP_DEFLATED,compresslevel=5) as archive:
     for source in package.rglob('*'):
         if source.is_file() and '__pycache__' not in source.parts:archive.write(source,(Path(package.name)/source.relative_to(package)).as_posix())
-source_names=files+['tools/build_release.py','tools/benchmark.py','tools/stop_service.py','LESSONS-1.md','LESSONS-2.md','LESSONS-3.md','LESSONS-4.md','LESSONS-5.md','LESSONS-6.md','LESSONS-7.md']
+source_names=files+['tools/build_release.py','tools/benchmark.py','tools/stop_service.py','LESSONS-1.md','LESSONS-2.md','LESSONS-3.md','LESSONS-4.md','LESSONS-5.md','LESSONS-6.md','LESSONS-7.md','LESSONS-8.md']
 with zipfile.ZipFile(source_zip,'w',zipfile.ZIP_DEFLATED,compresslevel=6) as archive:
     for name in source_names:archive.write(ROOT/name,(Path(base+'-Source')/name).as_posix())
     for directory in ('studio','web','browser-connector','licenses','tests'):

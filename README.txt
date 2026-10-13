@@ -1,4 +1,28 @@
-DISCORD ARCHIVE STUDIO 1.3.3 — WINDOWS x64
+DISCORD ARCHIVE STUDIO 1.4.0 — WINDOWS x64
+
+BUFFERED READING, LOCAL MEDIA AND INTERFACE SOUNDS
+The reader and Library load small local pages as you scroll and warm one nearby
+page. The visible window stays around 240 messages; up to eight playing message
+rows can remain pinned. New pages retain existing media elements and scroll
+anchors. Browsing never starts another Discord history traversal.
+Combine words or quoted/exact phrases with captured person names/IDs, attachment
+filenames/types and dates. Stable IDs retain captured name changes. Distinct
+accounts are linked only through your explicit aliases. Search and mute choices
+persist. Metadata indexes fill in small local chunks; legacy rows remain visible.
+Saved images, MP4, MP3, OGG and M4A render inline in chat surfaces. Playback starts
+when you click. Local byte ranges support seeking; unavailable/unsupported
+encodings have an Open saved file fallback. MIDI uses a small local synthesizer
+(format 0/1, notes, tempo and sustain), not a full instrument soundfont.
+Attachment downloads remain manual, capped and low priority; videos stay at
+10 MB. ZIP preview assets share a 100 MB cap. No new dependency is required.
+Five additional themes: Graphite, Ocean, Forest, Rose and Sepia.
+Drag waiting tasks using the row or grip: a floating preview and insertion
+placeholder show their position. Running slots remain fixed. Grip keyboard:
+Space picks up, arrows move, Enter saves, Escape cancels.
+Top-corner speaker toggles subtle locally synthesized queue/start/done/menu/drag
+sounds. Progress sounds occur at most once every 30 seconds of changed progress.
+Audio needs a browser interaction before it can play. Muting is saved across
+launches and shared between the main app and reader.
 
 SHARED CUSTOM EMOJI LIBRARY
 Custom emoji references and reactions use one persistent local asset per emoji ID,
