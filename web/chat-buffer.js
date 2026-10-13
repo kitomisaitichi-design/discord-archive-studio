@@ -31,5 +31,6 @@ window.ChatBuffer=(()=>{
     drop(){this.reset();}
   }
   function active(container){return [...container.querySelectorAll('audio,video')].some(el=>!el.paused)||!!container.querySelector('[data-midi-playing="true"]');}
-  return {reconcile,Pages,active};
+  function trimMetadata(map,keep,limit=600){for(const key of map.keys()){if(map.size<=Math.max(limit,keep.size))break;if(!keep.has(key))map.delete(key);}return map.size;}
+  return {reconcile,Pages,active,trimMetadata};
 })();

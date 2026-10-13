@@ -7,3 +7,4 @@
 - When migrating legacy search metadata, fill bounded local chunks and keep a complete fallback until the index is populated.
 - When ZIP media paths contain only hashes, derive MIME types from captured filenames so audio/video remain playable offline.
 - When a fixed tray overlaps the queue, calculate drag auto-scroll edges from the visible region above the tray.
+- When bounding a transcript, also prune its message and attachment metadata maps so long reading sessions do not retain every visited page.

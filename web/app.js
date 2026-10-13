@@ -20,6 +20,7 @@ systemTheme.addEventListener('change',()=>{if(theme==='system')applyTheme(theme)
 window.addEventListener('storage',event=>{if(event.key==='studio.theme')applyTheme(event.newValue);});
 const pending = new Set();
 const messageMap = new Map();
+let metadataPruneQueued=false;
 const selectedMedia = new Map();
 applyTheme(theme);
 $('theme-select').onchange=()=>applyTheme($('theme-select').value);
@@ -259,7 +260,8 @@ function previewMediaHTML(m){
   return (m.attachments||[]).map(a=>`<div class="preview-attachment">📎 ${esc(a.filename||a.fileName||'Attachment')}${a.size?` <span class="muted">${(Number(a.size)/1000000).toFixed(2)} MB</span>`:''}</div>`).join('')+(m.embeds||[]).map(e=>`<div class="preview-attachment">${StudioEmoji.html(String(e.title||e.description||'Embedded content').slice(0,500))}</div>`).join('');
 }
 function messageHTML(m, local, small=false) {
-  messageMap.set(m.id,m);
+  messageMap.set(String(m.id),m);
+  if(messageMap.size>600&&!metadataPruneQueued){metadataPruneQueued=true;queueMicrotask(()=>{metadataPruneQueued=false;ChatBuffer.trimMetadata(messageMap,new Set([...document.querySelectorAll('[data-message-id]')].map(el=>el.dataset.messageId)));});}
   const author=m.author?.global_name||m.author?.nickname||m.author?.username||m.author?.name||'Unknown';
   const initial=Array.from(author).slice(0,2).join('').toUpperCase();
   const avatar=/^\/avatar\/[a-f0-9]{64}$/.test(m._avatar_url||'')?`<img src="${esc(m._avatar_url)}" alt="${esc(initial)}" loading="lazy" width="40" height="40">`:esc(initial);

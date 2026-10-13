@@ -7,6 +7,7 @@ assert.equal(song.notes.length,1);assert.equal(song.notes[0].note,60);assert.equ
 const sustained=context.window.MidiPlayer.parse(midi([0,0xb0,64,127,0,0x90,60,80,0x83,0x60,0x80,60,0,0x83,0x60,0xb0,64,0,0,0xff,0x2f,0]));assert.equal(sustained.notes[0].end,1);
 assert.throws(()=>context.window.MidiPlayer.parse(midi([0,0x90,60])),/Truncated/);assert.throws(()=>context.window.MidiPlayer.parse(midi([0,0xff,0x2f,0],0x8000)),/timebase/);
 vm.runInContext(fs.readFileSync('web/chat-buffer.js','utf8'),context);
+const metadata=new Map(Array.from({length:10000},(_,i)=>[String(i),{id:String(i)}])),visible=new Set(['1','2','3','9999']);context.window.ChatBuffer.trimMetadata(metadata,visible);assert.equal(metadata.size,600);for(const id of visible)assert.ok(metadata.has(id));
 (async()=>{let calls=0,resolve;const Pages=context.window.ChatBuffer.Pages,pages=new Pages((params,signal)=>{calls++;return new Promise((done,reject)=>{resolve=done;signal.addEventListener('abort',()=>reject(Object.assign(Error('Cancelled'),{name:'AbortError'})));});});
 const a=pages.get('a',{cursor:'one'}),b=pages.get('a',{cursor:'one'});assert.equal(calls,1);resolve({messages:['one']});assert.equal((await a).messages[0],'one');await b;
 const stale=pages.get('a',{cursor:'two'});pages.reset();const fresh=pages.get('a',{cursor:'two'});const freshResolve=resolve;assert.equal(await stale,null);freshResolve({messages:['fresh']});assert.equal((await fresh).messages[0],'fresh');await pages.get('a',{cursor:'two'});assert.equal(calls,3);

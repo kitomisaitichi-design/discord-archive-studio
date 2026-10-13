@@ -13,7 +13,7 @@ import zipfile
 ROOT=Path(__file__).resolve().parents[1]
 parser=argparse.ArgumentParser()
 parser.add_argument('--python-runtime',type=Path,default=Path(sys.executable).parent)
-parser.add_argument('--version',default='1.4.0')
+parser.add_argument('--version',default='1.4.1')
 args=parser.parse_args()
 runtime=args.python_runtime.resolve()
 out=(ROOT/'outputs').resolve()

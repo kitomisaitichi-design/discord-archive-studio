@@ -1,10 +1,12 @@
-DISCORD ARCHIVE STUDIO 1.4.0 — WINDOWS x64
+DISCORD ARCHIVE STUDIO 1.4.1 — WINDOWS x64
 
 BUFFERED READING, LOCAL MEDIA AND INTERFACE SOUNDS
 The reader and Library load small local pages as you scroll and warm one nearby
 page. The visible window stays around 240 messages; up to eight playing message
 rows can remain pinned. New pages retain existing media elements and scroll
-anchors. Browsing never starts another Discord history traversal.
+anchors. Message metadata is capped at 600 entries while preserving visible
+messages; file mappings follow the current message window. Browsing never
+starts another Discord history traversal.
 Combine words or quoted/exact phrases with captured person names/IDs, attachment
 filenames/types and dates. Stable IDs retain captured name changes. Distinct
 accounts are linked only through your explicit aliases. Search and mute choices
