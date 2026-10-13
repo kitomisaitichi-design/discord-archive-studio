@@ -129,7 +129,7 @@ class Handler(BaseHTTPRequestHandler):
             route = urlparse(self.path)
             query = {k: v[-1] for k, v in parse_qs(route.query).items()}
             if route.path == '/api/health':
-                self.json({'app': 'Discord Archive Studio', 'version': '1.4.1','library_id':library_identity(self.server.store.root)})
+                self.json({'app': 'Discord Archive Studio', 'version': '1.5.0','library_id':library_identity(self.server.store.root)})
                 return
             if route.path in ('/', '/index.html', '/reader.html'):
                 payload = (self.server.web / ('reader.html' if route.path == '/reader.html' else 'index.html')).read_bytes()
@@ -163,8 +163,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not row or not path.is_file(): raise ValueError('Profile picture is not saved.')
                 payload = path.read_bytes()
                 self.send_headers(kind=row['kind'],length=len(payload)); self.wfile.write(payload)
+            elif route.path == '/api/author':
+                from .author_view import author_view
+                self.json(author_view(self.server.store,self.server.reader,query.get('id',''),query.get('archive','')))
             elif route.path == '/api/search':
-                result = self.server.store.search(query.get('q', ''), query.get('channel'), query.get('server'), query.get('person'), query.get('start'), query.get('end'), query.get('offset', 0), query.get('limit', 80), query.get('attachment',''),query.get('type',''),query.get('phrase')=='1',query.get('cursor'))
+                result = self.server.store.search(query.get('q', ''), query.get('channel'), query.get('server'), query.get('person'), query.get('start'), query.get('end'), query.get('offset', 0), query.get('limit', 80), query.get('attachment',''),query.get('type',''),query.get('phrase')=='1',query.get('cursor'),query.get('inclusive')=='1')
                 self.decorate(result)
                 self.json(result)
             elif route.path == '/api/preview':
@@ -195,7 +198,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 from .local_media import mime,send
                 send(self,mime(row['filename']),path=path)
-            elif route.path in ('/app.js', '/style.css', '/server-picker.js', '/queue.js', '/queue-settings.js', '/people.js', '/archives.js', '/reader.js', '/reader.css', '/avatar-cache.js', '/emoji-cache.js', '/emoji-library.js','/chat-buffer.js','/media-view.js','/midi-player.js','/enhancements.css','/library-scroll.js','/sounds.js'):
+            elif route.path in ('/app.js', '/style.css', '/server-picker.js', '/queue.js', '/queue-settings.js', '/people.js', '/archives.js', '/reader.js', '/reader.css', '/avatar-cache.js', '/emoji-cache.js', '/emoji-library.js','/chat-buffer.js','/media-view.js','/midi-player.js','/enhancements.css','/library-scroll.js','/sounds.js','/rendering.js','/experience.js','/experience.css'):
                 path = self.server.web / route.path.lstrip('/')
                 payload = path.read_bytes()
                 self.send_headers(kind='text/javascript; charset=utf-8' if path.suffix=='.js' else 'text/css; charset=utf-8', length=len(payload))

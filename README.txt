@@ -1,4 +1,20 @@
-DISCORD ARCHIVE STUDIO 1.4.1 — WINDOWS x64
+DISCORD ARCHIVE STUDIO 1.5.0 — WINDOWS x64
+
+READING, SEARCH AND SMOOTHER UPDATES
+Queue progress retains task rows and focus. Hidden pages defer their rendering;
+local counts, calendars and reader result totals reuse bounded generation caches.
+Ctrl+K opens quick search/navigation. Save named searches, clear individual filter
+chips, bookmark messages, and jump into the surrounding saved conversation.
+Click a captured person's name to see names mapped to their stable ID, including
+in a ZIP. This reads saved data rather than enumerating server members.
+The Aa control saves Off/Subtle/Full motion, Comfortable/Dense spacing and text
+size. System reduced motion takes priority. Drag a pane edge or use its arrow
+keys to resize; the Channels/Calendar control hides the corresponding pane.
+Downloads and asset caches live under Library's Downloads & assets button.
+Detailed export options open in their own panel. Reading positions, bookmarks
+and saved searches are stored in this browser for this local app address; export
+defaults and checkpoints remain in Data. Moving to a different browser or port
+does not migrate browser preferences automatically.
 
 BUFFERED READING, LOCAL MEDIA AND INTERFACE SOUNDS
 The reader and Library load small local pages as you scroll and warm one nearby

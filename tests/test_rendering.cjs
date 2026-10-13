@@ -1,0 +1,10 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const frames=[],events={},updates=[];
+const context={console,WeakMap,Map,JSON,document:{hidden:false,addEventListener:(name,callback)=>events[name]=callback},requestAnimationFrame:callback=>(frames.push(callback),frames.length),applyState:value=>updates.push(value)};
+for(const name of ['renderQueue','renderCatalog','renderConnection','renderSavedHistory','renderScheduleManager','showPage'])context[name]=()=>{};
+vm.createContext(context);vm.runInContext(fs.readFileSync('web/rendering.js','utf8'),context);
+for(let i=0;i<50;i++)vm.runInContext('scheduleState({value:'+i+'})',context);
+assert.equal(frames.length,1);frames.shift()();assert.equal(updates.length,1);assert.equal(updates[0].value,49);
+context.document.hidden=true;vm.runInContext('scheduleState({value:51});scheduleState({value:52})',context);assert.equal(frames.length,0);
+context.document.hidden=false;events.visibilitychange();assert.equal(frames.length,1);frames.shift()();assert.equal(updates.length,2);assert.equal(updates[1].value,52);
+console.log('Rendering: event bursts retain the latest state, use one frame, and resume hidden-page updates once.');

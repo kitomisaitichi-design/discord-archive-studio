@@ -101,7 +101,8 @@ function renderCatalog() {
       if(next!==group){html+=`<div class="channel-group">${next}</div>`;group=next;}
       html+=`<label class="channel-row"><input type="checkbox" data-channel="${esc(channel.id)}" ${selected.has(channel.id)?'checked':''} ${state.connection.connected&&!channel.accessible?'disabled':''}><span class="channel-type">${thread?'↳':[2,13].includes(channel.type)?'◖':'#'}</span><span class="channel-name">${esc(channel.name)}</span><small>${state.connection.connected&&!channel.accessible?'saved':channel.count?number(channel.count):''}</small></label>`;
     }
-    $('channel-list').innerHTML=html || '<div class="empty small">No channels here yet.<br>Refresh your current accessible inventory.</div>';
+    const channelHTML=html || '<div class="empty small">No channels here yet.<br>Refresh your current accessible inventory.</div>';
+    if(typeof StudioRender!=='undefined')StudioRender.markup($('channel-list'),channelHTML);else $('channel-list').innerHTML=channelHTML;
     $('channel-list').dataset.signature=signature;
   }
   replaceSelect($('library-server'),state.servers,$('library-server').value,'Every server');
@@ -203,7 +204,7 @@ function renderSavedHistory() {
   const channels=state.channels.filter(c=>c.count>0).sort((a,b)=>b.count-a.count);
   $('history-summary').textContent=`${number(state.stats.messages)} messages saved locally across ${number(channels.length)} conversations. Partial batches are included; ${number(state.queue.length)} tasks remain in the queue.`;
   const box=$('history-saved'),scroll=box.scrollTop;
-  box.innerHTML=channels.map(c=>{const job=state.queue.find(j=>j.channel_id===c.id),server=state.servers.find(s=>s.id===c.server_id);return `<div class="saved-row"><div><strong>${esc(server?.name||c.server_id)} · # ${esc(c.name)}</strong><small>${number(c.count)} saved messages · ${job?esc(job.status):c.history_done?'History captured':'Saved checkpoint'}</small></div><button data-saved-channel="${esc(c.id)}">Read messages →</button></div>`;}).join('')||'<div class="empty">Saved batches will appear here as messages arrive.</div>';
+  const savedHTML=channels.map(c=>{const job=state.queue.find(j=>j.channel_id===c.id),server=state.servers.find(s=>s.id===c.server_id);return `<div class="saved-row"><div><strong>${esc(server?.name||c.server_id)} · # ${esc(c.name)}</strong><small>${number(c.count)} saved messages · ${job?esc(job.status):c.history_done?'History captured':'Saved checkpoint'}</small></div><button data-saved-channel="${esc(c.id)}">Read messages →</button></div>`;}).join('')||'<div class="empty">Saved batches will appear here as messages arrive.</div>';if(typeof StudioRender!=='undefined')StudioRender.markup(box,savedHTML);else box.innerHTML=savedHTML;
   box.scrollTop=scroll;
 }
 function renderScheduleManager() {
@@ -218,7 +219,7 @@ function renderScheduleManager() {
   $('clear-all-schedules').disabled=!owner||!state.schedules.some(s=>s.owner_id===owner)||pending.has('schedule-bulk');
   $('undo-schedule-removal').hidden=!state.schedule_recovery;
   const box=$('schedule-manager'),scroll=box.scrollTop;
-  box.innerHTML=entries.map(s=>{const allowed=owner===s.owner_id;return `<div class="saved-row ${s.enabled?'':'schedule-paused'}"><input type="checkbox" data-select-schedule="${esc(s.scope)}" aria-label="Select ${esc(scheduleName(s))}" ${scheduleSelection.has(s.scope)?'checked':''} ${allowed?'':'disabled'}><div><strong>${esc(scheduleName(s))}</strong><small>${s.mode==='adaptive'?'Adaptive · current '+duration(s.minutes):'Every '+duration(s.minutes)}${s.options.inherited?' · inherited':' · independent'}<br>${s.enabled?'Next: '+esc(new Date(s.next_run*1000).toLocaleString()):'Paused'}${allowed?'':' · connect the original account to manage'}</small></div><div class="saved-actions"><button data-edit-schedule="${esc(s.scope)}" ${allowed?'':'disabled'}>Edit</button><button data-toggle-schedule="${esc(s.scope)}" ${allowed?'':'disabled'}>${s.enabled?'Pause':'Enable'}</button></div></div>`;}).join('')||'<div class="empty">'+(q?'No matching schedules.':'No schedules yet. Choose a server or channels in Export, then enable a schedule.')+'</div>';
+  const savedHTML=entries.map(s=>{const allowed=owner===s.owner_id;return `<div class="saved-row ${s.enabled?'':'schedule-paused'}"><input type="checkbox" data-select-schedule="${esc(s.scope)}" aria-label="Select ${esc(scheduleName(s))}" ${scheduleSelection.has(s.scope)?'checked':''} ${allowed?'':'disabled'}><div><strong>${esc(scheduleName(s))}</strong><small>${s.mode==='adaptive'?'Adaptive · current '+duration(s.minutes):'Every '+duration(s.minutes)}${s.options.inherited?' · inherited':' · independent'}<br>${s.enabled?'Next: '+esc(new Date(s.next_run*1000).toLocaleString()):'Paused'}${allowed?'':' · connect the original account to manage'}</small></div><div class="saved-actions"><button data-edit-schedule="${esc(s.scope)}" ${allowed?'':'disabled'}>Edit</button><button data-toggle-schedule="${esc(s.scope)}" ${allowed?'':'disabled'}>${s.enabled?'Pause':'Enable'}</button></div></div>`;}).join('')||'<div class="empty">'+(q?'No matching schedules.':'No schedules yet. Choose a server or channels in Export, then enable a schedule.')+'</div>';if(typeof StudioRender!=='undefined')StudioRender.markup(box,savedHTML);else box.innerHTML=savedHTML;
   box.scrollTop=scroll;
 }
 function readSavedChannel(id) {
@@ -307,20 +308,20 @@ function applyState(value) {
   const was=state;state=value;StudioSounds.update(value,was);
   if(was&&currentPage==='library'&&JSON.stringify(was.channels.map(c=>[c.id,c.generation]))!==JSON.stringify(value.channels.map(c=>[c.id,c.generation])))$('library-updates').hidden=false;
   if(!was){$('destination').value=value.destination;setIntervalMinutes(1440);}
-  if(!was&&currentPage==='library')searchLibrary();
   renderConnection();renderCatalog();renderQueue();renderSavedHistory();renderScheduleManager();
+  if(!was&&currentPage==='library')searchLibrary();
   $('auto-connect').checked=state.auto_connect;
   $('app-address').textContent=location.origin;$('app-address').href=location.origin+'/';
-  $('media-task-list').innerHTML=(state.media_tasks||[]).map(t=>`<div class="schedule-item"><div><strong># ${esc(t.channel_name)} · ${esc(t.attachment_id)}</strong><small>${esc(t.status)} · ${(t.received/1000000).toFixed(2)} MB · ${esc(t.detail)}</small></div>${['queued','running','paused'].includes(t.status)?`<button data-cancel-media="${esc(t.attachment_id)}">Cancel</button>`:''}</div>`).join('')||'<p class="hint">No attachments selected. Text exports never start media downloads.</p>';
+  const mediaHTML=(state.media_tasks||[]).map(t=>`<div class="schedule-item" data-media-task="${esc(t.attachment_id)}"><div><strong># ${esc(t.channel_name)} · ${esc(t.attachment_id)}</strong><small>${esc(t.status)} · ${(t.received/1000000).toFixed(2)} MB · ${esc(t.detail)}</small></div>${['queued','running','paused'].includes(t.status)?`<button data-cancel-media="${esc(t.attachment_id)}">Cancel</button>`:''}</div>`).join('')||'<p class="hint">No attachments selected. Text exports never start media downloads.</p>';if(typeof StudioRender!=='undefined')StudioRender.markup($('media-task-list'),mediaHTML);else $('media-task-list').innerHTML=mediaHTML;
   replaceSelect($('preset-select'),state.presets.map(p=>({id:p.name,name:p.name})),$('preset-select').value,'Load a preset…');
-  if(value.stats.messages!==knownMessageCount){if(currentPage==='library'&&was)$('library-updates').hidden=false;knownMessageCount=value.stats.messages;preview();}
+  if(value.stats.messages!==knownMessageCount){if(currentPage==='library'&&was)$('library-updates').hidden=false;knownMessageCount=value.stats.messages;if(currentPage==='export'&&mode!=='dock')preview();}
   if(value.worker_error&&value.worker_error!==was?.worker_error)toast(value.worker_error,true);
   if(typeof updatePeopleAccount==='function')updatePeopleAccount();
   if(typeof updateQueueSettingsState==='function')updateQueueSettingsState();
 }
 function connectEvents() {
   stream?.close();stream=new EventSource('/api/events');
-  stream.onmessage=event=>{try{applyState(JSON.parse(event.data));$('offline-banner').hidden=true;}catch(e){console.error('Unable to render archive update',e);}};
+  stream.onmessage=event=>{try{const value=JSON.parse(event.data);if(typeof scheduleState==='function')scheduleState(value);else applyState(value);$('offline-banner').hidden=true;}catch(e){console.error('Unable to render archive update',e);}};
   stream.onerror=()=>{if(!closing)$('offline-banner').hidden=false;};
 }
 async function saveSchedule(enabled) {

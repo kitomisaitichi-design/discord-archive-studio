@@ -26,6 +26,9 @@ def valid_id(value):
 
 class Store:
     def __init__(self, root):
+        from .local_cache import LocalCache
+        self.metadata_cache = LocalCache(128)
+        self.count_cache = LocalCache(4096)
         self.version = 0
         self.archive_lock = threading.RLock()
         self.queue_lock = threading.RLock()
@@ -253,16 +256,20 @@ class Store:
 
     def channels(self, server_id=None):
         with self.db() as db:
-            return [dict(r) for r in db.execute('''SELECT c.id,c.server_id,c.name,c.type,c.parent_id,c.last_id,c.history_done,
-              c.last_scan,c.generation,(SELECT count(*) FROM messages m WHERE m.channel_id=c.id) count
-              FROM channels c WHERE (? IS NULL OR c.server_id=?) ORDER BY c.type,c.name''', (server_id, server_id))]
+            rows=[dict(r) for r in db.execute('''SELECT c.id,c.server_id,c.name,c.type,c.parent_id,c.last_id,c.history_done,
+              c.last_scan,c.generation FROM channels c WHERE (? IS NULL OR c.server_id=?) ORDER BY c.type,c.name''', (server_id, server_id))]
+            for row in rows:
+                row['count']=self.count_cache.get(('count',row['id'],row['generation']),
+                    lambda:db.execute('SELECT count(*) FROM messages WHERE channel_id=?',(row['id'],)).fetchone()[0])
+            return rows
 
     def servers(self):
+        channels=self.channels()
         with self.db() as db:
-            return [dict(r) for r in db.execute('''SELECT s.id,s.name,(SELECT count(*) FROM channels c WHERE c.server_id=s.id) channels,
-              (SELECT count(*) FROM messages m JOIN channels c ON c.id=m.channel_id WHERE c.server_id=s.id) messages FROM servers s ORDER BY s.name''')]
+            return [dict(r,channels=sum(c['server_id']==r['id'] for c in channels),messages=sum(c['count'] for c in channels if c['server_id']==r['id']))
+                    for r in db.execute('SELECT id,name FROM servers ORDER BY name')]
 
-    def search(self, text='', channel=None, server=None, person=None, start=None, end=None, offset=0, limit=80, attachment='', media_type='', phrase=False, cursor=None):
+    def search(self, text='', channel=None, server=None, person=None, start=None, end=None, offset=0, limit=80, attachment='', media_type='', phrase=False, cursor=None, inclusive=False):
         from .searching import match_text, metadata_filter, backfill
         terms = text.strip().split()
         where, params = [], []
@@ -294,7 +301,7 @@ class Store:
             count = db.execute('SELECT count(*)' + join + ' WHERE ' + condition, params).fetchone()[0]
             if cursor:
                 from .reader_library import decode_cursor
-                where_cursor=' AND (m.timestamp,length(m.id),m.id)<(?,?,?)'
+                where_cursor=' AND (m.timestamp,length(m.id),m.id)'+('<=' if inclusive else '<')+'(?,?,?)'
                 cursor_args=decode_cursor(cursor)
             else:where_cursor='';cursor_args=[]
             rows = db.execute('SELECT m.id,m.timestamp,m.raw,m.channel_id,c.name channel_name,c.server_id' + join + ' WHERE ' + condition + where_cursor +
@@ -608,9 +615,10 @@ class Store:
         return {'minutes': minutes, 'sample_messages': count, 'sample_days': 7, 'covered_minutes':round(covered_minutes,2)}
 
     def stats(self):
+        channels=self.channels()
         with self.db() as db:
-            return {'messages': db.execute('SELECT count(*) FROM messages').fetchone()[0],
+            return {'messages': sum(c['count'] for c in channels),
                     'people': db.execute('SELECT count(*) FROM users').fetchone()[0],
                     'attachments': db.execute('SELECT count(*) FROM media').fetchone()[0],
-                    'channels': db.execute('SELECT count(*) FROM channels WHERE generation>0').fetchone()[0],
+                    'channels': sum(c['generation']>0 for c in channels),
                     'revisions': db.execute('SELECT count(*) FROM revisions').fetchone()[0]}

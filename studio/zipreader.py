@@ -348,6 +348,12 @@ class ZipReader:
         if entry:
             return reader_library.query(self.store,entry,kind,query,AvatarsView(self.store))
         path, generation, entry = self.index(key)
+        if kind in ('overview','calendar'):
+            stamp=('zip-metadata',key,generation,kind,query.get('channel'),query.get('month'),query.get('day'))
+            return self.store.metadata_cache.get(stamp,lambda:self._query_index(path,generation,entry,kind,query))
+        return self._query_index(path,generation,entry,kind,query)
+
+    def _query_index(self,path,generation,entry,kind,query):
         with closing(sqlite3.connect(path)) as db:
             db.row_factory = sqlite3.Row
             if kind == 'overview':
@@ -374,7 +380,8 @@ class ZipReader:
             filters,values=metadata_filter(query,zip_index=True)
             if filters:where+=' AND '+' AND '.join(filters);args+=values
             base,base_args=where,list(args)
-            total = db.execute('SELECT count(*) FROM messages m WHERE '+where,args).fetchone()[0]
+            total=self.store.metadata_cache.get(('zip-total',entry['id'],generation,where,tuple(args)),
+                lambda:db.execute('SELECT count(*) FROM messages m WHERE '+where,args).fetchone()[0])
             reverse = False
             if query.get('before'):
                 where += ' AND seq<?'; args.append(int(query['before'])); reverse = True

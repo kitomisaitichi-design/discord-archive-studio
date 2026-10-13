@@ -1,7 +1,7 @@
 'use strict';
 // Extend the existing Library controls without changing queue or export state.
 const libraryContainer=$('library-results');
-let libraryEpoch=0,libraryBusy=false,libraryHasMore=false,libraryPrefsLoaded=false;
+let libraryEpoch=0,libraryBusy=false,libraryHasMore=false,libraryPrefsLoaded=false,libraryRestore=null;
 const libraryPages=new ChatBuffer.Pages((query,signal)=>api('search?'+new URLSearchParams(query),undefined,signal));
 function libraryQuery(extra={}){return {q:$('library-search').value,server:$('library-server').value,channel:$('library-channel').value,person:$('library-person').value,attachment:$('library-attachment').value,type:$('library-type').value,phrase:$('library-phrase').checked?'1':'',start:$('library-start').value,end:$('library-end').value,limit:80,...extra};}
 const originalRenderResults=renderResults;
@@ -15,11 +15,13 @@ renderResults=function(){
 };
 searchLibrary=async function(){
   if(!state)return;
-  if(!libraryPrefsLoaded){libraryPrefsLoaded=true;try{const prefs=JSON.parse(localStorage.getItem('studio.library-search')||'{}');for(const name of ['search','person','attachment','type','start','end'])if(prefs[name])$('library-'+name).value=prefs[name];$('library-phrase').checked=!!prefs.phrase;}catch{}}
+  if(!libraryPrefsLoaded){libraryPrefsLoaded=true;try{const prefs=JSON.parse(localStorage.getItem('studio.library-search')||'{}');for(const name of ['server','channel','search','person','attachment','type','start','end']){if(prefs[name])$('library-'+name).value=prefs[name];if(name==='server')updateLibraryChannels();}$('library-phrase').checked=!!prefs.phrase;}catch{}}
+  if(libraryEpoch===0){try{libraryRestore=JSON.parse(localStorage.getItem('studio.library-position')||'null');}catch{}}
   const epoch=++libraryEpoch;libraryPages.reset();searchAbort?.abort();libraryBusy=true;
-  const query=libraryQuery({offset});
-  localStorage.setItem('studio.library-search',JSON.stringify(Object.fromEntries(['search','person','attachment','type','start','end','phrase'].map(name=>[name,name==='phrase'?$('library-phrase').checked:$('library-'+name).value]))));
-  try{const value=await libraryPages.get('initial',query);if(!value||epoch!==libraryEpoch)return;results=value;libraryContainer.replaceChildren();libraryHasMore=offset+value.messages.length<value.total;libraryBusy=false;renderResults();libraryContainer.scrollTop=0;$('library-updates').hidden=true;warmLibrary();}
+  const query=libraryQuery({offset}),restore=libraryRestore;libraryRestore=null;
+  if(restore?.signature===JSON.stringify(libraryQuery())){query.cursor=restore.cursor;query.inclusive='1';delete query.offset;offset=restore.index||0;}
+  localStorage.setItem('studio.library-search',JSON.stringify(Object.fromEntries(['server','channel','search','person','attachment','type','start','end','phrase'].map(name=>[name,name==='phrase'?$('library-phrase').checked:$('library-'+name).value]))));
+  try{const value=await libraryPages.get('initial',query);if(!value||epoch!==libraryEpoch)return;results=value;libraryContainer.replaceChildren();libraryHasMore=offset+value.messages.length<value.total;libraryBusy=false;renderResults();libraryContainer.scrollTop=0;if(query.inclusive&&restore){const row=libraryContainer.querySelector('[data-message-id="'+CSS.escape(restore.message)+'"]');if(row)libraryContainer.scrollTop+=row.getBoundingClientRect().top-libraryContainer.getBoundingClientRect().top-(restore.top||0);}$('library-updates').hidden=true;warmLibrary();}
   catch(error){if(epoch===libraryEpoch&&error.name!=='AbortError')toast(error.message,true);}
   finally{if(epoch===libraryEpoch)libraryBusy=false;}
 };

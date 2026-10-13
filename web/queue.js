@@ -5,15 +5,16 @@ queueSpaceObserver.observe($('queue-tray'));
 const queueAnnouncement=document.createElement('div');queueAnnouncement.className='sr-only';queueAnnouncement.setAttribute('aria-live','polite');document.body.append(queueAnnouncement);
 const queueHint=document.createElement('p');queueHint.className='queue-reorder-hint';queueHint.textContent='Drag a waiting task to rearrange. Keyboard: focus its grip, press Space, use ↑ / ↓, then Enter. Escape cancels.';$('queue-detail').before(queueHint);
 function movable(id){const job=state?.queue.find(j=>j.id===id);return !!job&&job.id!==state.processing_job&&['queued','paused','waiting','blocked'].includes(job.status);}
-function clearQueueGesture(render=true){cancelAnimationFrame(queueFrame);queuePointer?.ghost?.remove();document.querySelectorAll('.queue-placeholder,.queue-keyboard-picked').forEach(el=>el.classList.remove('queue-placeholder','queue-keyboard-picked'));draggedJob=null;queuePointer=null;document.body.classList.remove('queue-dragging');queueSignature='';if(render&&state)renderQueue();}
+function clearQueueGesture(render=true){cancelAnimationFrame(queueFrame);queuePointer?.ghost?.remove();document.querySelectorAll('.queue-placeholder,.queue-keyboard-picked').forEach(el=>el.classList.remove('queue-placeholder','queue-keyboard-picked'));document.querySelectorAll('.drag-handle[aria-pressed]').forEach(el=>el.removeAttribute('aria-pressed'));draggedJob=null;queuePointer=null;document.body.classList.remove('queue-dragging');queueSignature='';if(render&&state)renderQueue();}
 async function moveQueueTask(id,before){queueMovePending=true;try{await api('reorder',{id,before});applyState(await api('state'));queueAnnouncement.textContent='Queue order saved.';StudioSounds.play('drop');toast('Queue order saved.');}catch(error){toast(error.message,true);}finally{queueMovePending=false;queueSignature='';if(state)renderQueue();document.querySelector('#queue-detail [data-queue-job="'+CSS.escape(id)+'"] .drag-handle')?.focus({preventScroll:true});}}
 function arrange(gesture,before){
   if(before===gesture.before)return;gesture.before=before;
   const rows=[...gesture.container.querySelectorAll('[data-queue-job]')],rects=new Map(rows.map(row=>[row,row.getBoundingClientRect().top]));
   const ids=rows.filter(row=>row.dataset.movable==='true').map(row=>row.dataset.queueJob).filter(id=>id!==gesture.id);ids.splice(before?ids.indexOf(before):ids.length,0,gesture.id);
   const nodes=new Map(rows.map(row=>[row.dataset.queueJob,row]));let i=0;
-  for(const row of rows)gesture.container.append(row.dataset.movable==='true'?nodes.get(ids[i++]):row);
-  if(!matchMedia('(prefers-reduced-motion: reduce)').matches)for(const row of rows){const delta=rects.get(row)-row.getBoundingClientRect().top;if(delta)row.animate([{transform:'translateY('+delta+'px)'},{transform:'translateY(0)'}],{duration:160,easing:'ease-out'});}
+  const order=rows.map(row=>row.dataset.movable==='true'?nodes.get(ids[i++]):row);let next=gesture.container.firstElementChild;
+  for(const row of order){if(row!==next)gesture.container.insertBefore(row,next);next=row.nextElementSibling;}
+  if(document.documentElement.dataset.motion!=='off'&&!matchMedia('(prefers-reduced-motion: reduce)').matches)for(const row of rows){const delta=rects.get(row)-row.getBoundingClientRect().top;if(delta)row.animate([{transform:'translateY('+delta+'px)'},{transform:'translateY(0)'}],{duration:160,easing:'ease-out'});}
 }
 function dragTick(){
   const gesture=queuePointer;if(!gesture?.moved||gesture.keyboard)return;

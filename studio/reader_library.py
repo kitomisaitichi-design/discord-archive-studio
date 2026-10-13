@@ -42,6 +42,12 @@ def decode_cursor(value):
 
 
 def overview(store, entry):
+    channels=store.channels(entry['server_id'])
+    stamp=tuple((c['id'],c['name'],c['generation'],c['count']) for c in channels)
+    return store.metadata_cache.get(('overview',entry['server_id'],stamp),lambda:_overview(store,entry))
+
+
+def _overview(store, entry):
     with store.db() as db:
         rows=list(db.execute('''SELECT c.id,c.name,c.generation,count(m.id) messages,
             date(min(m.timestamp)) first,date(max(m.timestamp)) last FROM channels c
@@ -51,6 +57,14 @@ def overview(store, entry):
 
 
 def query(store, entry, kind, params, avatars):
+    if kind=='calendar':
+        generation=overview(store,entry)['generation']
+        return store.metadata_cache.get(('calendar',entry['server_id'],generation,params.get('channel'),params.get('month'),params.get('day')),
+            lambda:_query(store,entry,kind,params,avatars))
+    return _query(store,entry,kind,params,avatars)
+
+
+def _query(store, entry, kind, params, avatars):
     data=overview(store,entry)
     if kind=='overview':return data
     cid=params.get('channel','')
@@ -92,7 +106,9 @@ def query(store, entry, kind, params, avatars):
         filters,values=metadata_filter(params)
         if filters:
             backfill(db,cid);base+=' AND '+' AND '.join(filters);args+=values
-        total=db.execute('SELECT count(*) FROM messages m WHERE '+base,args).fetchone()[0]
+        identity_stamp=tuple(tuple(r) for r in db.execute('SELECT user_id,person_id FROM aliases ORDER BY user_id')) if params.get('author') or params.get('person') else ()
+        total=store.metadata_cache.get(('search-total',cid,data['generation'],identity_stamp,base,tuple(args)),
+            lambda:db.execute('SELECT count(*) FROM messages m WHERE '+base,args).fetchone()[0])
         where,values=base,list(args);reverse=False
         if params.get('before') or params.get('after'):
             reverse=bool(params.get('before'))
@@ -101,7 +117,11 @@ def query(store, entry, kind, params, avatars):
         elif params.get('message'):
             row=db.execute('SELECT * FROM messages WHERE channel_id=? AND id=?',(cid,str(params['message']))).fetchone()
             if not row:raise ValueError('The referenced message has not been saved in this channel.')
-            where+=' AND (m.timestamp,length(m.id),m.id)>=(?,?,?)';values += [row['timestamp'],len(row['id']),row['id']]
+            # Include a small amount of preceding context, using the existing local index.
+            context=list(db.execute('SELECT id,timestamp FROM messages WHERE channel_id=? AND (timestamp,length(id),id)<=(?,?,?) ORDER BY timestamp DESC,length(id) DESC,id DESC LIMIT ?',
+                (cid,row['timestamp'],len(row['id']),row['id'],11 if params.get('surrounding')=='1' else 1)))
+            first=context[-1]
+            where+=' AND (m.timestamp,length(m.id),m.id)>=(?,?,?)';values += [first['timestamp'],len(first['id']),first['id']]
         elif params.get('day') and not terms and not any(params.get(k) for k in ('author','attachment','type','start','end')):
             hour=min(23,max(0,int(params.get('hour',0))))
             start=datetime.strptime(params['day'],'%Y-%m-%d').replace(hour=hour,tzinfo=timezone.utc)

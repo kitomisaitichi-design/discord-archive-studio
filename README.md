@@ -8,6 +8,10 @@ Download the **Portable ZIP** from [Releases](https://github.com/kitomisaitichi-
 
 ## What it does
 
+- Retained task rows, coalesced progress events, deferred hidden-page rendering and bounded local metadata caches keep updates responsive.
+- Ctrl+K search/navigation, named saved searches, removable filter chips, safe text highlighting, bookmarks, last-read restoration and jumps into surrounding saved conversation.
+- Captured-person drawers show saved name history and explicit identity links without enumerating server members.
+- Saved motion, spacing and text-size controls; resizable/collapsible panes and contextual export/download panels keep the reading area clear.
 - Incremental ID-based scans resume from saved cursors. Ordinary updates fetch only newer messages; full historical rescans require an explicit choice.
 - One serialized export queue with adjustable batches, durable pauses, positive random timing variation and rate-limit waits.
 - Full runtime settings for one task, selected tasks, all non-running tasks, or future additions. Cooling-down work is editable; active work is locked, and checked-field changes preserve other settings and checkpoints.
