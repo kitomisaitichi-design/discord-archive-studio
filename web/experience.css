@@ -26,6 +26,7 @@ body:has(.queue-tray.collapsed) #tray-jobs .progress-fill,body:has(.page:not(.ac
 @media(min-width:741px) and (max-width:1120px){body.pane-collapsed:not(.secondary-view):not(.mode-compact):not(.reader-body) .workspace{grid-template-columns:64px minmax(0,1fr)}body.pane-collapsed .main-pane,body.pane-collapsed .summary-pane{grid-column:2}}
 @media(max-width:740px){.reading-tools{gap:6px}.reading-tools button{padding:7px}.reading-tools select{width:140px}.pane-toggle{padding:6px}.experience-dialog{padding:16px}.secondary-view .main-pane{grid-column:auto}}
 @media(max-width:900px){.app-header,.reader-header{flex-wrap:wrap;gap:8px}.app-header .brand small{display:none}.theme-picker{margin-left:0}.reader-header label{margin-left:0}}
+@media(max-width:740px){.navigation{flex-wrap:wrap}#page-settings .input-row{flex-wrap:wrap}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 
 /* Export settings retain the existing inputs and saved values in a scoped layout. */
