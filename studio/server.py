@@ -20,6 +20,7 @@ from .store import packed, valid_id
 from .launching import library_identity
 from .people import People
 from .zipreader import ZipReader
+from .updates import Updater, CURRENT_VERSION
 
 
 class Server(ThreadingHTTPServer):
@@ -43,6 +44,7 @@ class Server(ThreadingHTTPServer):
         self.native_window_enabled = False
         self.people = People(store)
         self.reader = ZipReader(store,app_root=self.web.parent)
+        self.updater = Updater(store,self.web.parent,worker,self)
 
     def state(self):
         destination = self.worker.destination()
@@ -71,6 +73,7 @@ class Server(ThreadingHTTPServer):
                 'defaults': DEFAULT_OPTIONS, 'presets': presets, 'demo': self.store.setting('demo', False),
                 'media_tasks': self.store.media_tasks(), 'auto_connect':self.store.setting('auto_connect',True),
                 'avatar_tasks':self.worker.exporter.avatars.tasks(),
+                'application_update':self.updater.status(),
                 'worker_error': self.store.setting('worker_error', '')}
 
 
@@ -98,7 +101,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Cache-Control', (extra or {}).get('Cache-Control','no-store'))
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Referrer-Policy', 'no-referrer')
-        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://cdn.discordapp.com https://media.discordapp.net; media-src 'self' https://cdn.discordapp.com https://media.discordapp.net; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'")
+        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: http: https:; media-src 'self' https://cdn.discordapp.com https://media.discordapp.net; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'")
         if length is not None:
             self.send_header('Content-Length', str(length))
         for key, value in (extra or {}).items():
@@ -129,7 +132,7 @@ class Handler(BaseHTTPRequestHandler):
             route = urlparse(self.path)
             query = {k: v[-1] for k, v in parse_qs(route.query).items()}
             if route.path == '/api/health':
-                self.json({'app': 'Discord Archive Studio', 'version': '1.5.1','library_id':library_identity(self.server.store.root)})
+                self.json({'app': 'Discord Archive Studio', 'version': CURRENT_VERSION,'library_id':library_identity(self.server.store.root)})
                 return
             if route.path in ('/', '/index.html', '/reader.html'):
                 payload = (self.server.web / ('reader.html' if route.path == '/reader.html' else 'index.html')).read_bytes()
@@ -141,6 +144,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if route.path == '/api/state':
                 self.json(self.server.state())
+            elif route.path == '/api/updates':
+                self.json(self.server.updater.status())
             elif route.path == '/api/reader/catalog':
                 self.json({'archives':self.server.reader.catalogue(query.get('refresh')=='1'),'warnings':self.server.reader.discovery_warnings})
             elif route.path == '/api/emojis/library':
@@ -167,7 +172,7 @@ class Handler(BaseHTTPRequestHandler):
                 from .author_view import author_view
                 self.json(author_view(self.server.store,self.server.reader,query.get('id',''),query.get('archive','')))
             elif route.path == '/api/search':
-                result = self.server.store.search(query.get('q', ''), query.get('channel'), query.get('server'), query.get('person'), query.get('start'), query.get('end'), query.get('offset', 0), query.get('limit', 80), query.get('attachment',''),query.get('type',''),query.get('phrase')=='1',query.get('cursor'),query.get('inclusive')=='1')
+                result = self.server.store.search(query.get('q', ''), query.get('channel'), query.get('server'), query.get('person'), query.get('start'), query.get('end'), query.get('offset', 0), query.get('limit', 80), query.get('attachment',''),query.get('type',''),query.get('phrase')=='1',query.get('cursor'),query.get('inclusive')=='1',query.get('newer')=='1')
                 self.decorate(result)
                 self.json(result)
             elif route.path == '/api/preview':
@@ -198,7 +203,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 from .local_media import mime,send
                 send(self,mime(row['filename']),path=path)
-            elif route.path in ('/app.js', '/style.css', '/server-picker.js', '/queue.js', '/queue-settings.js', '/people.js', '/archives.js', '/reader.js', '/reader.css', '/avatar-cache.js', '/emoji-cache.js', '/emoji-library.js','/chat-buffer.js','/media-view.js','/midi-player.js','/enhancements.css','/library-scroll.js','/sounds.js','/rendering.js','/experience.js','/experience.css'):
+            elif route.path in ('/app.js', '/style.css', '/server-picker.js', '/queue.js', '/queue-settings.js', '/people.js', '/archives.js', '/reader.js', '/reader.css', '/avatar-cache.js', '/emoji-cache.js', '/emoji-library.js','/chat-buffer.js','/media-view.js','/midi-player.js','/enhancements.css','/library-scroll.js','/sounds.js','/rendering.js','/experience.js','/experience.css','/updates.js'):
                 path = self.server.web / route.path.lstrip('/')
                 payload = path.read_bytes()
                 self.send_headers(kind='text/javascript; charset=utf-8' if path.suffix=='.js' else 'text/css; charset=utf-8', length=len(payload))
@@ -301,6 +306,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def action(self, path, data, bridge=False):
         store, connection, worker = self.server.store, self.server.connection, self.server.worker
+        if not bridge and path == '/api/updates/settings':return self.server.updater.configure(data)
+        if not bridge and path == '/api/updates/check':return self.server.updater.request_check()
         if bridge:
             origin = self.extension_origin()
             declared = str(data.get('extension_id',''))

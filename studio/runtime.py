@@ -166,6 +166,8 @@ class Worker:
         self.stop = threading.Event()
         self.wake = threading.Event()
         self.member_cache = {}
+        self.maintenance = threading.Event()
+        self.cycle_lock = threading.Lock()
 
     def signal(self):
         self.wake.set()
@@ -451,7 +453,11 @@ class Worker:
 
     def run(self):
         while not self.stop.is_set():
+            if self.maintenance.is_set():
+                self.wake.wait(.25);self.wake.clear();continue
+            self.cycle_lock.acquire()
             try:
+                if self.maintenance.is_set():continue
                 self.tick_schedules()
                 if self.connection.token and time.time() >= self.store.setting('cooldown_until', 0):
                     candidates = [j for j in self.store.jobs() if j['status'] in ('queued', 'waiting') and j['owner_id'] == self.connection.account['id']]
@@ -483,5 +489,7 @@ class Worker:
                 self.process_search_index()
             except Exception as error:
                 self.store.set_setting('worker_error', str(error))
+            finally:
+                self.cycle_lock.release()
             self.wake.wait(2)
             self.wake.clear()

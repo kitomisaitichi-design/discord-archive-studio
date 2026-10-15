@@ -107,7 +107,7 @@ class ZipReader:
             if not refresh and signature==self.discovery_roots and time.monotonic()<self.discovery_until:
                 return list(self.discovery)
             found,seen,warnings=[],set(),[]
-            skip={'data','runtime','.git','.work','recovery','logs','__pycache__','node_modules','reader-cache','reader-archives'}
+            skip={'data','runtime','.git','.work','.updates','recovery','logs','__pycache__','node_modules','reader-cache','reader-archives'}
             visited=0
             def scan_error(error):warnings.append('Folder unavailable: '+str(error.filename))
             for root in roots:

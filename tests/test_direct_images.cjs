@@ -1,0 +1,12 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const context={window:{addEventListener(){}},document:{addEventListener(){}},localStorage:{getItem(){return null;}},MutationObserver:class{observe(){}},URL,console};
+vm.createContext(context);vm.runInContext(fs.readFileSync('web/media-view.js','utf8'),context);
+const media=context.window.MediaView;
+assert.deepEqual([...media.imageLinks('https://example.com/a.JPG?token=abc https://example.com/b.png https://example.com/anim.gif')],['https://example.com/a.JPG?token=abc','https://example.com/b.png','https://example.com/anim.gif']);
+assert.equal(media.imageLinks('https://example.com/a.jpg https://example.com/a.jpg').length,1);
+assert.equal(media.imageLinks('javascript:alert(1) file:///a.png https://user:secret@example.com/a.png https://example.com/not-image.html').length,0);
+assert.match(media.directHTML('https://example.com/a.png?x=1&y=2'),/referrerpolicy="no-referrer"/);
+assert.match(media.directHTML('https://example.com/a.png?x=1&y=2'),/x=1&amp;y=2/);
+assert.ok(!/\ssrc=/.test(media.directHTML('https://example.com/a.png')));
+assert.equal(media.imageLinks(Array.from({length:1000},(_,i)=>'https://example.com/'+i+'.jpg').join(' ')).length,8);
+console.log('Direct image URLs: formats, query strings, deduplication, escaping, safe schemes and lazy request bounds passed.');

@@ -37,6 +37,7 @@ def main():
     parser.add_argument('--reuse-window', action='store_true', help='Keep native controls for an existing app window without opening another.')
     parser.add_argument('--no-connect', action='store_true')
     parser.add_argument('--demo', action='store_true')
+    parser.add_argument('--update-receipt', type=Path, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
     args.data=args.data.resolve()
     with LibraryLock(args.data) as lock:
@@ -60,10 +61,26 @@ def run_service(args):
     port=server.server_port
     save_address(args.data,port)
     server.native_window_enabled = not args.no_browser or args.reuse_window
-    if not args.no_connect:
-        threading.Thread(target=connection.monitor, daemon=True).start()
     worker_thread = threading.Thread(target=worker.run, daemon=True)
-    worker_thread.start()
+    activated = threading.Event()
+    def activate():
+        if args.update_receipt:
+            receipt=args.update_receipt.resolve();receipt.relative_to(Path(__file__).resolve().parent/'.updates')
+            result=receipt.with_suffix('.result.json')
+            for _ in range(300):
+                if worker.stop.wait(.2):return
+                try:
+                    if json.loads(result.read_text(encoding='utf-8')).get('status')=='complete':break
+                except (OSError,ValueError):pass
+            else:
+                server.shutdown();return
+            server.updater.save(status='current',available='',payload='',error='')
+        if not args.no_connect:
+            threading.Thread(target=connection.monitor, daemon=True).start()
+        worker_thread.start();activated.set()
+        if not args.demo and not args.no_connect:server.updater.start()
+    if args.update_receipt:threading.Thread(target=activate,daemon=True).start()
+    else:activate()
     if not args.no_browser:
         open_app(port)
     print('Discord Archive Studio listening locally on port', port, flush=True)
@@ -76,8 +93,9 @@ def run_service(args):
         worker.signal()
         connection.stop.set()
         connection.reconnect.set()
+        server.updater.stop.set();server.updater.wake.set()
         # Let a bounded network read finish and ZIP/media finally blocks clean up.
-        worker_thread.join(timeout=50)
+        if activated.is_set():worker_thread.join(timeout=50)
         server.server_close()
 
 

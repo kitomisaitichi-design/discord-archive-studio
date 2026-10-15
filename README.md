@@ -8,6 +8,8 @@ Download the **Portable ZIP** from [Releases](https://github.com/kitomisaitichi-
 
 ## What it does
 
+- Silent application updates are enabled by default in portable copies. Settings controls the check frequency (daily by default) and off toggle. Public release downloads are checked against GitHub's SHA-256 digest and the package manifest, staged locally, and installed after the worker finishes its current work. Startup failure restores the previous files; Data and Exports stay in place.
+- Direct JPG, PNG and GIF links display near the viewport, with four concurrent image loads, reserved image space, a failure link and a saved Reading & appearance toggle. These links need a reachable image host; attachment downloads remain manual. The Library, reader and preview keep a rolling window of up to 500 saved messages with bounded adjacent-page prefetch.
 - Export details use readable Capture, Files and Pacing tabs. History groups searchable conversations by server or DMs and keeps completed task details expandable. Library aligns its search controls and transcript, resolves filter names and keeps message actions accessible on hover or keyboard focus.
 - Retained task rows, coalesced progress events, deferred hidden-page rendering and bounded local metadata caches keep updates responsive.
 - Ctrl+K search/navigation, named saved searches, removable filter chips, safe text highlighting, bookmarks, last-read restoration and jumps into surrounding saved conversation.

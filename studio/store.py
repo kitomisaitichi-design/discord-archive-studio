@@ -269,7 +269,7 @@ class Store:
             return [dict(r,channels=sum(c['server_id']==r['id'] for c in channels),messages=sum(c['count'] for c in channels if c['server_id']==r['id']))
                     for r in db.execute('SELECT id,name FROM servers ORDER BY name')]
 
-    def search(self, text='', channel=None, server=None, person=None, start=None, end=None, offset=0, limit=80, attachment='', media_type='', phrase=False, cursor=None, inclusive=False):
+    def search(self, text='', channel=None, server=None, person=None, start=None, end=None, offset=0, limit=80, attachment='', media_type='', phrase=False, cursor=None, inclusive=False, newer=False):
         from .searching import match_text, metadata_filter, backfill
         terms = text.strip().split()
         where, params = [], []
@@ -301,12 +301,15 @@ class Store:
             count = db.execute('SELECT count(*)' + join + ' WHERE ' + condition, params).fetchone()[0]
             if cursor:
                 from .reader_library import decode_cursor
-                where_cursor=' AND (m.timestamp,length(m.id),m.id)'+('<=' if inclusive else '<')+'(?,?,?)'
+                comparison=('>=' if inclusive else '>') if newer else ('<=' if inclusive else '<')
+                where_cursor=' AND (m.timestamp,length(m.id),m.id)'+comparison+'(?,?,?)'
                 cursor_args=decode_cursor(cursor)
             else:where_cursor='';cursor_args=[]
+            direction='ASC' if newer and cursor else 'DESC'
             rows = db.execute('SELECT m.id,m.timestamp,m.raw,m.channel_id,c.name channel_name,c.server_id' + join + ' WHERE ' + condition + where_cursor +
-                              ' ORDER BY m.timestamp DESC,length(m.id) DESC,m.id DESC LIMIT ? OFFSET ?',
+                              ' ORDER BY m.timestamp '+direction+',length(m.id) '+direction+',m.id '+direction+' LIMIT ? OFFSET ?',
                               params + cursor_args + [max(1, min(int(limit), 200)), 0 if cursor else max(0, int(offset))]).fetchall()
+            if newer and cursor:rows=list(reversed(rows))
         from .reader_library import cursor as encode_cursor
         return {'total': count, 'messages': [dict(json.loads(r['raw']), channel_name=r['channel_name'], server_id=r['server_id'],_cursor=encode_cursor(r)) for r in rows]}
 

@@ -1,8 +1,10 @@
 'use strict';
 window.ChatBuffer=(()=>{
-  function reconcile(container,items,html,id=m=>String(m.id),{empty='No saved messages.',limit=240}={}){
+  const LIMIT=500;
+  function reconcile(container,items,html,id=m=>String(m.id),{empty='No saved messages.',limit=LIMIT}={}){
     const existing=new Map([...container.querySelectorAll(':scope > [data-chat-key]')].map(el=>[el.dataset.chatKey,el]));
-    const visible=[...container.children].find(el=>el.getBoundingClientRect().bottom>=container.getBoundingClientRect().top);
+    const containerTop=container.getBoundingClientRect().top;
+    const visible=[...container.children].find(el=>el.getBoundingClientRect().bottom>=containerTop);
     const anchorKey=visible?.dataset.chatKey,anchorTop=visible?.getBoundingClientRect().top;
     const keep=new Set();let previous=null;
     for(const item of items.slice(0,limit)){
@@ -32,5 +34,5 @@ window.ChatBuffer=(()=>{
   }
   function active(container){return [...container.querySelectorAll('audio,video')].some(el=>!el.paused)||!!container.querySelector('[data-midi-playing="true"]');}
   function trimMetadata(map,keep,limit=600){for(const key of map.keys()){if(map.size<=Math.max(limit,keep.size))break;if(!keep.has(key))map.delete(key);}return map.size;}
-  return {reconcile,Pages,active,trimMetadata};
+  return {LIMIT,reconcile,Pages,active,trimMetadata};
 })();

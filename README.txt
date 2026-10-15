@@ -1,4 +1,16 @@
-DISCORD ARCHIVE STUDIO 1.5.1 — WINDOWS x64
+DISCORD ARCHIVE STUDIO 1.6.0 — WINDOWS x64
+
+SILENT UPDATES AND INLINE IMAGE LINKS
+Settings > Application updates is on by default and checks daily while the app
+is running. Change the interval or turn it off. Verified portable updates wait
+for the worker to finish its current work, retain Data/Exports and saved settings,
+and restore the previous files if the updated app cannot start. The existing
+browser window reconnects. Backups and staged releases are kept in .updates.
+Reading & appearance > Show images from direct JPG, PNG & GIF links controls
+native inline previews. Images load near your scroll position with a bounded
+queue and a fallback link if unavailable. Remote links need a reachable host;
+they are separate from the manual attachment archive. The nearby saved-message
+window now holds up to 500 messages with small adjacent local pages.
 
 READABLE EXPORT DETAILS AND A CLEANER LIBRARY
 Export details separate Capture, Files and Pacing with aligned checkboxes and
@@ -24,7 +36,7 @@ does not migrate browser preferences automatically.
 
 BUFFERED READING, LOCAL MEDIA AND INTERFACE SOUNDS
 The reader and Library load small local pages as you scroll and warm one nearby
-page. The visible window stays around 240 messages; up to eight playing message
+page. The visible window holds up to 500 messages; up to eight playing message
 rows can remain pinned. New pages retain existing media elements and scroll
 anchors. Message metadata is capped at 600 entries while preserving visible
 messages; file mappings follow the current message window. Browsing never
@@ -179,8 +191,10 @@ LIBRARY AND IDENTITY
   adaptive schedules are added only where no channel/server schedule exists.
   Contact metadata is cached by account for ten minutes and refreshed on demand.
   Friend filters and selected contacts persist in this browser for that account.
-- Attachments and images download ONLY after you select their checkboxes in
+- Attachment files are archived ONLY after you select their checkboxes in
   Library and click Download selected. This queue waits for text jobs to finish.
+  Direct JPG/PNG/GIF URL previews are separate and can be disabled in Reading
+  & appearance; previewing a link does not add that file to the saved archive.
   Default per-file cap: 10 MB (decimal); adjustable 1–100 MB. Videos always have
   a hard 10 MB cap. Pending selections reserve at most 100 MB / 50 files.
   Unknown sizes are streamed within the cap. Oversized files are skipped and
@@ -295,7 +309,7 @@ Choose ZIP reader in the left menu, or Read ZIP in History. Each archive opens
 in its own browser tab, with channel selection, calendar activity, hour jumps,
 search by words/author, and a continuous timeline. Scroll or use Earlier/Later.
 Dates use UTC. Reading indexes saved files locally; it never fetches Discord
-history. The timeline renders at most 240 messages, loading 80 at a time.
+history. The timeline renders up to 500 messages, loading 80 at a time.
 Use Open ZIP for existing exports (upload limit 128 MB); current server ZIPs
 open directly from disk. Reader limits: 10,000 entries, 128 MB per text part,
 512 MB total text, 100 MB cached files, 10 MB per included file. Unavailable
