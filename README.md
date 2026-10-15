@@ -1,5 +1,11 @@
 # Discord Archive Studio
 
+Version 1.7 adds **New since last read**, manual **Save offline** controls for linked PNG/JPEG/GIF images, **Needs attention**, and local search autocomplete. Try `from:Alice in:general has:image after:2026-01-01`. Quote names with spaces; Ctrl+Space shows operators and arrow keys/Enter select suggestions. Inline operators override matching Library filter fields; reader searches remain within the selected channel. `before:` includes the specified day, matching the Through date filter.
+
+Unread watermarks advance for visible saved messages and persist locally. Unread searches freeze their initial boundary until refreshed, so reading cannot hide the remaining page. Native saved-library reader tabs share these marks; external ZIPs keep separate reading positions. Older history captured later does not reset your watermark.
+
+Save offline is manual, capped at 10 MB per linked image and queued after text work. Each URL has one task; identical bytes share the existing hashed cache. Related server ZIPs include selected images when their saved-file option is enabled. External ZIPs stay intact and can use the shared local image cache in the reader. Needs attention reads local failure records and bounded file checks; blocked channels offer Review instead of Retry.
+
 A portable Windows client for keeping a searchable local Discord archive. It reads conversations, saves each message once, and updates one current ZIP per server.
 
 ## Download and run

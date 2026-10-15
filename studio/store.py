@@ -101,11 +101,17 @@ class Store:
 
         from .searching import install
         with self.db() as db: install(db)
+        from .reading import Reading
+        self.reading = Reading(self)
+        from .linked_images import LinkedImages
+        self.images = LinkedImages(self)
 
     @contextmanager
     def db(self):
         db = sqlite3.connect(self.path, timeout=20)
         db.row_factory = sqlite3.Row
+        from .linked_images import image_links
+        db.create_function('image_link', 2, lambda text, name: int(any(str(name or '').lower() in url.lower().split('?')[0] for url in image_links(text))), deterministic=True)
         db.execute('PRAGMA journal_mode=WAL')
         db.execute('PRAGMA busy_timeout=20000')
         try:
@@ -152,6 +158,7 @@ class Store:
             pending = {r['attachment_id']:r['max_bytes'] for r in db.execute("SELECT * FROM media_requests WHERE status IN ('queued','running')")}
             avatar_count = db.execute("SELECT count(*) FROM avatar_tasks WHERE status IN ('queued','running')").fetchone()[0] if db.execute("SELECT 1 FROM sqlite_master WHERE name='avatar_tasks'").fetchone() else 0
             avatar_count += db.execute("SELECT count(*) FROM emojis WHERE status IN ('queued','running')").fetchone()[0]
+            linked_count, linked_bytes = db.execute("SELECT count(*),coalesce(sum(max_bytes),0) FROM linked_images WHERE status IN ('queued','running')").fetchone()
             added = skipped = 0
             for selection in selections:
                 mid, aid = valid_id(selection['message_id']), valid_id(selection['attachment_id'])
@@ -165,7 +172,7 @@ class Store:
                     raise ValueError('Selected attachment is not part of this saved message.')
                 maximum = media_limit(attachment,cap_mb)
                 reason = media_reason(attachment,maximum)
-                if not reason and (len(pending)+avatar_count>=50 or sum(pending.values())+avatar_count*1000000+maximum>100000000):
+                if not reason and (len(pending)+avatar_count+linked_count>=50 or sum(pending.values())+avatar_count*1000000+linked_bytes+maximum>100000000):
                     raise ValueError('Pending downloads are capped at 100 MB and 50 files. Finish or cancel some selections first.')
                 status = 'skipped' if reason else 'queued'
                 db.execute('INSERT OR REPLACE INTO media_requests VALUES(?,?,?,?,?,0,?,?)',(aid,mid,row['channel_id'],status,maximum,reason or 'Selected manually; waiting until text exports finish.',time.time()))
@@ -269,8 +276,12 @@ class Store:
             return [dict(r,channels=sum(c['server_id']==r['id'] for c in channels),messages=sum(c['count'] for c in channels if c['server_id']==r['id']))
                     for r in db.execute('SELECT id,name FROM servers ORDER BY name')]
 
-    def search(self, text='', channel=None, server=None, person=None, start=None, end=None, offset=0, limit=80, attachment='', media_type='', phrase=False, cursor=None, inclusive=False, newer=False):
-        from .searching import match_text, metadata_filter, backfill
+    def search(self, text='', channel=None, server=None, person=None, start=None, end=None, offset=0, limit=80, attachment='', media_type='', phrase=False, cursor=None, inclusive=False, newer=False, unread=None):
+        from .searching import match_text, metadata_filter, backfill, expand, scope_filter
+        parsed = expand({'q':text,'person':person,'start':start,'end':end,'attachment':attachment,'type':media_type})
+        text, person, start, end, attachment, media_type = (parsed.get(k) for k in ('q','person','start','end','attachment','type'))
+        if parsed.get('scope_channel'): channel = None
+        if parsed.get('scope_server'): server = None
         terms = text.strip().split()
         where, params = [], []
         if terms:
@@ -288,15 +299,18 @@ class Store:
                 params.append(str(value))
         extra,values=metadata_filter({'person':person,'attachment':attachment,'type':media_type})
         where+=extra;params+=values
+        extra, values = scope_filter(parsed)
+        where += extra; params += values
         if start:
             where.append('m.timestamp>=?')
             params.append(start)
         if end:
             where.append('m.timestamp<?')
             params.append(end + 'T23:59:59.999999Z' if len(end) == 10 else end)
-        condition = ' AND '.join(where) or '1'
         join = ' FROM messages m JOIN channels c ON c.id=m.channel_id LEFT JOIN aliases a ON a.user_id=m.author_id '
         with self.db() as db:
+            if unread: where.append(self.reading.condition(db, unread))
+            condition = ' AND '.join(where) or '1'
             if person or attachment or media_type: backfill(db,channel)
             count = db.execute('SELECT count(*)' + join + ' WHERE ' + condition, params).fetchone()[0]
             if cursor:

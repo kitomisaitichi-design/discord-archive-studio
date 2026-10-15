@@ -380,6 +380,34 @@ class Worker:
             self.store.update_media(aid,status='failed',detail='Download failed: '+str(error)+'. Signed links may expire; rescan text and retry explicitly.')
         self.store.set_setting('media_next',time.time()+5)
 
+    def process_images(self):
+        if self.text_pending() or time.time()<self.store.setting('media_next',0):
+            return
+        images = self.exporter.images
+        task = next((r for r in images.tasks() if r['status']=='queued'), None)
+        if not task:
+            return
+        key = task['url_key']
+        images.update(key, 'running', 'Saving selected linked image…')
+        def control():
+            return not self.stop.is_set() and not self.text_pending() and any(
+                r['url_key']==key and r['status']=='running' for r in images.tasks())
+        try:
+            images.fetch(task, control)
+            with self.store.db() as db:
+                servers = [r[0] for r in db.execute("SELECT DISTINCT server_id FROM image_refs WHERE url_key=? AND scope='library' AND server_id<>''", (key,))]
+            for sid in servers:
+                if not control():
+                    raise Interrupted('Yielded to text export or cancelled.')
+                self.exporter.publish(sid, options(None), self.destination(), control, selected_channels=[])
+            images.update(key, 'completed', 'Saved offline; related server ZIPs updated.')
+        except Interrupted:
+            if any(r['url_key']==key and r['status']=='running' for r in images.tasks()):
+                images.update(key, 'queued', 'Yielded to text work; cached bytes retained.')
+        except Exception as error:
+            images.update(key, 'failed', str(error)+' Retry is manual.')
+        self.store.set_setting('media_next', time.time()+varied_delay(5,25))
+
     def avatar_window(self):
         jobs=self.store.jobs()
         return not self.stop.is_set() and not any(j['status']=='running' for j in jobs) and (
@@ -485,6 +513,7 @@ class Worker:
                                 self.store.release_job(job['id'])
                 self.process_emoji()
                 self.process_media()
+                self.process_images()
                 self.process_avatar()
                 self.process_search_index()
             except Exception as error:

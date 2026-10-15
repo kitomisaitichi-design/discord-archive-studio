@@ -230,7 +230,7 @@ class ZipReader:
                 target = self.root / (digest+'.sqlite3')
                 valid=False
                 if target.exists():
-                    with closing(sqlite3.connect(target)) as db:valid=db.execute('PRAGMA user_version').fetchone()[0]>=3
+                    with closing(sqlite3.connect(target)) as db:valid=db.execute('PRAGMA user_version').fetchone()[0]>=4
                 if not valid:
                     self.build(snapshot, target)
                 self.known[key] = (signature, target, digest)
@@ -251,7 +251,7 @@ class ZipReader:
                     CREATE TABLE assets(id TEXT PRIMARY KEY,kind TEXT,data BLOB);
                     CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);
                     CREATE VIRTUAL TABLE search USING fts5(body,author,tokenize='unicode61');''')
-                db.execute('PRAGMA user_version=3')
+                db.execute('PRAGMA user_version=4')
                 infos = {i.filename: i for i in archive.infolist() if not i.is_dir()}
                 manifest = {}
                 if 'manifest.json' in infos:
@@ -320,6 +320,12 @@ class ZipReader:
                                     captured=references(m).get(str(eid),{})
                                     self.emojis.import_asset(str(eid),row[0],captured.get('name','emoji'),captured.get('animated',False))
                         if emoji_assets:m['_emoji_assets']=emoji_assets
+                        linked = {}
+                        for url, local in (m.get('linked_images') or {}).items():
+                            if isinstance(local, str) and not local.startswith(('http:', 'https:')):
+                                aid = asset(posixpath.normpath(posixpath.join(folder,local)))
+                                if aid: linked[url] = aid
+                        if linked: m['_linked_images'] = linked
                         avatar = author.get('avatar_local_path') or author.get('avatarUrl','')
                         if avatar and not avatar.startswith(('http:', 'https:')):
                             aid = asset(posixpath.normpath(posixpath.join(folder, avatar)))
@@ -354,8 +360,13 @@ class ZipReader:
         return self._query_index(path,generation,entry,kind,query)
 
     def _query_index(self,path,generation,entry,kind,query):
+        if kind == 'messages':
+            from .searching import expand
+            query = expand(query)
         with closing(sqlite3.connect(path)) as db:
             db.row_factory = sqlite3.Row
+            from .linked_images import image_links
+            db.create_function('image_link',2,lambda text,name:int(any(str(name or '').lower() in url.lower().split('?')[0] for url in image_links(text))),deterministic=True)
             if kind == 'overview':
                 channels = [dict(r) for r in db.execute('SELECT c.*,count(m.id) messages,min(m.day) first,max(m.day) last FROM channels c LEFT JOIN messages m ON m.channel=c.id GROUP BY c.id ORDER BY count(m.id)>0 DESC,c.name')]
                 return {'archive':entry,'generation':generation,'channels':channels,'warnings':json.loads(db.execute("SELECT value FROM meta WHERE key='warnings'").fetchone()[0])}
@@ -378,6 +389,9 @@ class ZipReader:
                 args.append(match_text(terms,query.get('phrase')=='1'))
             from .searching import metadata_filter
             filters,values=metadata_filter(query,zip_index=True)
+            from .searching import scope_filter
+            scopes, scope_values = scope_filter(query, zip_index=True, archive_name=entry['name'])
+            filters += scopes; values += scope_values
             if filters:where+=' AND '+' AND '.join(filters);args+=values
             base,base_args=where,list(args)
             total=self.store.metadata_cache.get(('zip-total',entry['id'],generation,where,tuple(args)),
@@ -391,7 +405,7 @@ class ZipReader:
                 row = db.execute('SELECT seq FROM messages WHERE channel=? AND id=?',(cid,query['message'])).fetchone()
                 if not row: raise ValueError('The referenced message is absent from this ZIP.')
                 where += ' AND seq>=?'; args.append(max(1,row['seq']-10))
-            elif query.get('day') and not terms and not any(query.get(k) for k in ('author','attachment','type','start','end')):
+            elif query.get('day') and not terms and not any(query.get(k) for k in ('author','person','attachment','type','start','end','scope_channel','scope_server')):
                 day = query['day']
                 datetime.strptime(day,'%Y-%m-%d')
                 hour = min(23,max(0,int(query.get('hour',0))))

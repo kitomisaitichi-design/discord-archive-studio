@@ -72,6 +72,7 @@ class Server(ThreadingHTTPServer):
                 'destination': destination, 'cooldown_until': self.store.setting('cooldown_until', 0),
                 'defaults': DEFAULT_OPTIONS, 'presets': presets, 'demo': self.store.setting('demo', False),
                 'media_tasks': self.store.media_tasks(), 'auto_connect':self.store.setting('auto_connect',True),
+                'image_tasks': [dict(t,available=bool(t['hash'] and (self.store.root/'media'/t['hash']).is_file())) for t in self.worker.exporter.images.tasks()],
                 'avatar_tasks':self.worker.exporter.avatars.tasks(),
                 'application_update':self.updater.status(),
                 'worker_error': self.store.setting('worker_error', '')}
@@ -146,6 +147,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.json(self.server.state())
             elif route.path == '/api/updates':
                 self.json(self.server.updater.status())
+            elif route.path == '/api/reading':
+                self.json(self.server.store.reading.summary(query.get('channel')))
+            elif route.path == '/api/attention':
+                from .attention import inventory
+                self.json(inventory(self.server.store, self.server.updater))
+            elif route.path == '/api/search/suggest':
+                from .searching import suggestions
+                self.json(suggestions(self.server.store, self.server.reader, query))
             elif route.path == '/api/reader/catalog':
                 self.json({'archives':self.server.reader.catalogue(query.get('refresh')=='1'),'warnings':self.server.reader.discovery_warnings})
             elif route.path == '/api/emojis/library':
@@ -157,7 +166,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not row or not path.is_file():raise ValueError('Emoji image is not saved.')
                 payload=path.read_bytes();self.send_headers(kind=row['kind'],length=len(payload));self.wfile.write(payload)
             elif route.path in ('/api/reader/overview','/api/reader/calendar','/api/reader/messages'):
-                self.json(self.server.reader.query(query.get('archive',''),route.path.rsplit('/',1)[-1],query))
+                result = self.server.reader.query(query.get('archive',''),route.path.rsplit('/',1)[-1],query)
+                if 'messages' in result: self.decorate_images(result)
+                self.json(result)
             elif route.path == '/api/reader/asset':
                 self.server.reader.serve_asset(self,query.get('archive',''),query.get('id',''))
             elif re.fullmatch(r'/avatar/[a-f0-9]{64}',route.path):
@@ -172,7 +183,7 @@ class Handler(BaseHTTPRequestHandler):
                 from .author_view import author_view
                 self.json(author_view(self.server.store,self.server.reader,query.get('id',''),query.get('archive','')))
             elif route.path == '/api/search':
-                result = self.server.store.search(query.get('q', ''), query.get('channel'), query.get('server'), query.get('person'), query.get('start'), query.get('end'), query.get('offset', 0), query.get('limit', 80), query.get('attachment',''),query.get('type',''),query.get('phrase')=='1',query.get('cursor'),query.get('inclusive')=='1',query.get('newer')=='1')
+                result = self.server.store.search(query.get('q', ''), query.get('channel'), query.get('server'), query.get('person'), query.get('start'), query.get('end'), query.get('offset', 0), query.get('limit', 80), query.get('attachment',''),query.get('type',''),query.get('phrase')=='1',query.get('cursor'),query.get('inclusive')=='1',query.get('newer')=='1',query.get('unread'))
                 self.decorate(result)
                 self.json(result)
             elif route.path == '/api/preview':
@@ -193,17 +204,20 @@ class Handler(BaseHTTPRequestHandler):
                 self.json({'message':result['messages'][0], 'revisions':revisions,'media':result['media']})
             elif route.path == '/api/events':
                 self.events()
-            elif re.fullmatch(r'/media/[a-f0-9]{64}', route.path):
+            elif re.fullmatch(r'/(media|linked)/[a-f0-9]{64}', route.path):
                 digest = route.path.rsplit('/', 1)[-1]
                 path = self.server.store.root / 'media' / digest
                 with self.server.store.db() as db:
                     row = db.execute('SELECT filename FROM media WHERE hash=? LIMIT 1', (digest,)).fetchone()
+                    if not row:
+                        row = db.execute('SELECT filename FROM linked_images WHERE hash=? LIMIT 1', (digest,)).fetchone()
                 if not row or not path.is_file():
                     self.error('Attachment has not been saved.', 404)
                     return
                 from .local_media import mime,send
-                send(self,mime(row['filename']),path=path)
-            elif route.path in ('/app.js', '/style.css', '/server-picker.js', '/queue.js', '/queue-settings.js', '/people.js', '/archives.js', '/reader.js', '/reader.css', '/avatar-cache.js', '/emoji-cache.js', '/emoji-library.js','/chat-buffer.js','/media-view.js','/midi-player.js','/enhancements.css','/library-scroll.js','/sounds.js','/rendering.js','/experience.js','/experience.css','/updates.js'):
+                with path.open('rb') as source: head=source.read(16)
+                send(self,mime(row['filename'],head),path=path)
+            elif route.path in ('/app.js', '/style.css', '/server-picker.js', '/queue.js', '/queue-settings.js', '/people.js', '/archives.js', '/reader.js', '/reader.css', '/avatar-cache.js', '/emoji-cache.js', '/emoji-library.js','/chat-buffer.js','/media-view.js','/midi-player.js','/enhancements.css','/library-scroll.js','/sounds.js','/rendering.js','/experience.js','/experience.css','/updates.js','/workflows.js','/workflows.css'):
                 path = self.server.web / route.path.lstrip('/')
                 payload = path.read_bytes()
                 self.send_headers(kind='text/javascript; charset=utf-8' if path.suffix=='.js' else 'text/css; charset=utf-8', length=len(payload))
@@ -217,7 +231,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_HEAD(self):
         # The streaming routes use the same validation and metadata as GET.
-        if self.path.startswith(('/media/','/api/reader/asset')):
+        if self.path.startswith(('/media/','/linked/','/api/reader/asset')):
             self.do_GET()
         else:self.send_headers(405,length=0)
 
@@ -238,6 +252,13 @@ class Handler(BaseHTTPRequestHandler):
                     if row and not reason and (self.server.store.root/row['relative_path']).is_file():
                         local[aid]='/media/'+row['hash']
         result['media']=local
+        self.decorate_images(result)
+
+    def decorate_images(self,result):
+        images = self.server.worker.exporter.images.saved()
+        from .linked_images import image_links
+        for message in result['messages']:
+            message['_linked_images'] = {**message.get('_linked_images',{}), **{url:'/linked/'+images[url]['hash'] for url in image_links(message.get('content','')) if url in images}}
 
     def events(self):
         self.send_headers(kind='text/event-stream', extra={'X-Accel-Buffering': 'no'})
@@ -305,6 +326,24 @@ class Handler(BaseHTTPRequestHandler):
             self.error(error, 400, extra)
 
     def action(self, path, data, bridge=False):
+        if not bridge and path == '/api/reading/mark':
+            return self.server.store.reading.mark(data.get('selections'), self.server.reader)
+        if not bridge and path == '/api/reading/snapshot':
+            return {'snapshot': self.server.store.reading.snapshot()}
+        if not bridge and path == '/api/images/select':
+            result = self.server.worker.exporter.images.select(data.get('selections'), self.server.reader, data.get('cap_mb',10))
+            self.server.worker.signal()
+            return result
+        if not bridge and path == '/api/images/cancel':
+            key = str(data.get('id',''))
+            if not re.fullmatch('[a-f0-9]{64}',key): raise ValueError('Choose a saved image task.')
+            self.server.worker.exporter.images.update(key,'cancelled','Cancelled manually; cached image retained.')
+            return {'cancelled':True}
+        if not bridge and path == '/api/attention/retry':
+            from .attention import retry
+            result = retry(self.server, data)
+            self.server.worker.signal()
+            return result
         store, connection, worker = self.server.store, self.server.connection, self.server.worker
         if not bridge and path == '/api/updates/settings':return self.server.updater.configure(data)
         if not bridge and path == '/api/updates/check':return self.server.updater.request_check()

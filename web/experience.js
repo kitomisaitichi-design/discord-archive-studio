@@ -124,7 +124,7 @@ const StudioExperience=(()=>{
   const observer=new MutationObserver(records=>{if(!decorationQueued&&records.some(record=>reader||record.target.closest?.('#library-results,#mini-preview,.message'))){decorationQueued=true;queueMicrotask(()=>{decorationQueued=false;decorate();});}});
   const root=reader?byId('reader-timeline'):byId('main-reading-root')||document.querySelector('.workspace');
   function decorate(){
-    observer.disconnect();const input=searchInput.value.trim().slice(0,500);const terms=(query().phrase?[input]:[...input.matchAll(/"([^"]+)"|(\S+)/g)].map(m=>m[1]||m[2])).filter(Boolean).slice(0,30).map(s=>s.toLocaleLowerCase());
+    observer.disconnect();const raw=searchInput.value.trim().slice(0,500),input=typeof StudioWorkflow!=='undefined'?StudioWorkflow.literal(raw):raw;const terms=(query().phrase?[input]:[...input.matchAll(/"([^"]+)"|(\S+)/g)].map(m=>m[1]||m[2])).filter(Boolean).slice(0,30).map(s=>s.toLocaleLowerCase());
     const saved=new Set(bookmarks().map(b=>b.key));
     for(const row of root.querySelectorAll(reader?'.reader-message[data-id]':'.message[data-message-id]')){
       const m=rowMessage(row);if(!m)continue;const author=row.querySelector('.message-author');if(author){author.tabIndex=0;author.setAttribute('role','button');author.dataset.capturedAuthor=String(m.author?.id||'');author.title='Captured names and identity';}

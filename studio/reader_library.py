@@ -65,6 +65,9 @@ def query(store, entry, kind, params, avatars):
 
 
 def _query(store, entry, kind, params, avatars):
+    if kind == 'messages':
+        from .searching import expand
+        params = expand(params)
     data=overview(store,entry)
     if kind=='overview':return data
     cid=params.get('channel','')
@@ -104,6 +107,9 @@ def _query(store, entry, kind, params, avatars):
             args[0]=cid
             if len(args)>1:args[1]=match_text(terms,True)
         filters,values=metadata_filter(params)
+        from .searching import scope_filter
+        scopes, scope_values = scope_filter(params)
+        filters += scopes; values += scope_values
         if filters:
             backfill(db,cid);base+=' AND '+' AND '.join(filters);args+=values
         identity_stamp=tuple(tuple(r) for r in db.execute('SELECT user_id,person_id FROM aliases ORDER BY user_id')) if params.get('author') or params.get('person') else ()
@@ -122,7 +128,7 @@ def _query(store, entry, kind, params, avatars):
                 (cid,row['timestamp'],len(row['id']),row['id'],11 if params.get('surrounding')=='1' else 1)))
             first=context[-1]
             where+=' AND (m.timestamp,length(m.id),m.id)>=(?,?,?)';values += [first['timestamp'],len(first['id']),first['id']]
-        elif params.get('day') and not terms and not any(params.get(k) for k in ('author','attachment','type','start','end')):
+        elif params.get('day') and not terms and not any(params.get(k) for k in ('author','person','attachment','type','start','end','scope_channel','scope_server')):
             hour=min(23,max(0,int(params.get('hour',0))))
             start=datetime.strptime(params['day'],'%Y-%m-%d').replace(hour=hour,tzinfo=timezone.utc)
             where+=' AND m.timestamp>=? AND julianday(m.timestamp)>=julianday(?)'
@@ -138,9 +144,11 @@ def _query(store, entry, kind, params, avatars):
                 else:after=present
         wanted={str(a.get('id')) for row in rows for a in json.loads(row['raw']).get('attachments',[])}
         media={r['attachment_id']:dict(r) for r in db.execute('SELECT * FROM media WHERE attachment_id IN ('+','.join('?' for _ in wanted)+')',list(wanted))} if wanted else {}
-    cached=avatars.cached();messages=[];name=next(c['name'] for c in data['channels'] if c['id']==cid)
+    cached=avatars.cached();images=store.images.saved();messages=[];name=next(c['name'] for c in data['channels'] if c['id']==cid)
     for row in rows:
         m=dict(json.loads(row['raw']),channel_name=name,channel_id=cid,_seq=cursor(row))
+        from .linked_images import image_links
+        m['_linked_images'] = {url:images[url]['hash'] for url in image_links(m.get('content','')) if url in images}
         key=avatar_key(m.get('author',{}))
         if key and key[0] in cached:m['_avatar']=cached[key[0]]['hash']
         for a in m.get('attachments',[]):

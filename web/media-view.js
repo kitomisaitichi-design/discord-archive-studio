@@ -22,15 +22,16 @@ window.MediaView=(()=>{
     const found=new Set();
     for(const match of String(text||'').matchAll(/https?:\/\/[^\s<>"`]+/gi)){
       try{const raw=match[0].replace(/[),.;!?\]}]+$/g,''),url=new URL(raw);
-        if(['http:','https:'].includes(url.protocol)&&!url.username&&!url.password&&/\.(jpe?g|png|gif)$/i.test(url.pathname))found.add(url.href);
+        url.hash='';if(['http:','https:'].includes(url.protocol)&&!url.username&&!url.password&&/\.(jpe?g|png|gif)$/i.test(url.pathname))found.add(url.href);
       }catch{}
       if(found.size>=8)break;
     }
     return [...found];
   }
-  function directHTML(text){return imageLinks(text).map(url=>{
+  function directHTML(text,assets={}){return imageLinks(text).map(url=>{
     const name=new URL(url).pathname.split('/').pop()||'Image';
-    return `<div class="direct-media${directEnabled?'':' images-off'}"><div class="direct-image-frame"><img data-direct-src="${esc(url)}" width="480" height="270" loading="lazy" decoding="async" referrerpolicy="no-referrer" alt="${esc(name)}"><span class="direct-image-placeholder">${directEnabled?'Image loads as you approach':'Inline images are off'}</span></div><div class="direct-image-caption"><a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(name)} ↗</a><button type="button" data-direct-load>Load image</button></div></div>`;
+    const saved=String(assets[url]||''),local=/^\/(linked|media)\/[a-f0-9]{64}$/.test(saved)?saved:/^[a-f0-9]{64}$/.test(saved)?(typeof assetURL==='function'?assetURL(saved):'/linked/'+saved):'';
+    return `<div class="direct-media${directEnabled?'':' images-off'}" data-image-url="${esc(url)}"><div class="direct-image-frame"><img data-direct-src="${esc(local||url)}" width="480" height="270" loading="lazy" decoding="async" referrerpolicy="no-referrer" alt="${esc(name)}"><span class="direct-image-placeholder">${directEnabled?'Image loads as you approach':'Inline images are off'}</span></div><div class="direct-image-caption"><a href="${esc(local||url)}" target="_blank" rel="noopener noreferrer">${esc(name)} ↗</a><button type="button" data-direct-load>Load image</button><button type="button" data-save-linked ${local?'disabled':''}>${local?'Saved offline':'Save offline'}</button></div></div>`;
   }).join('');}
   function finishDirect(el,failed){
     const frame=el.closest('.direct-image-frame');if(!frame)return;
@@ -55,6 +56,15 @@ window.MediaView=(()=>{
     }
   }
   const directObservers=new Map(),directObserved=new WeakMap();
+  function useSaved(box,source){
+    const el=box.querySelector('[data-direct-src]');if(!el||el.dataset.directSrc===source)return;
+    if(el.getAttribute('src'))el.onerror?.();
+    directObserved.get(el)?.unobserve(el);directObserved.delete(el);el.onload=el.onerror=null;el.removeAttribute('src');
+    el.dataset.directSrc=source;delete el.dataset.directQueued;
+    box.querySelector('.direct-image-frame').classList.remove('image-failed','image-loaded');
+    box.querySelector('.direct-image-placeholder').textContent='Saved image loads as you approach';
+    box.querySelector('[data-direct-load]').textContent='Load image';observeDirect(el);
+  }
   function observeDirect(root=document){
     const elements=[...(root.matches?.('[data-direct-src]')?[root]:[]),...root.querySelectorAll('[data-direct-src]')];
     for(const el of elements){if(directObserved.has(el)||el.dataset.directQueued||el.getAttribute('src')||!directEnabled)continue;
@@ -78,11 +88,13 @@ window.MediaView=(()=>{
     const contents=[...(root.matches?.('.message-content')?[root]:[]),...root.querySelectorAll('.message-content')];
     for(const content of contents){if(content.dataset.directScanned)continue;content.dataset.directScanned='1';let text='';const walker=document.createTreeWalker(content,NodeFilter.SHOW_TEXT);let node;
       while(node=walker.nextNode())if(!node.parentElement.closest('code,pre'))text+=node.data+' ';
-      const markup=directHTML(text);if(markup)content.insertAdjacentHTML('afterend',markup);
+      const row=content.closest('.message,.reader-message'),id=row?.dataset.messageId||row?.dataset.id;
+      const message=typeof messages!=='undefined'&&Array.isArray(messages)?messages.find(m=>m.id===id):typeof results!=='undefined'?results.messages?.find(m=>m.id===id)||previewMessages?.get(id):null;
+      const markup=directHTML(text,message?._linked_images);if(markup)content.insertAdjacentHTML('afterend',markup);
     }
     observeDirect(root.matches?.('.message-content')?root.parentElement:root);
   }
   const directMutation=new MutationObserver(records=>{for(const entry of records){for(const node of entry.addedNodes)if(node.nodeType===1&&node.isConnected)decorateLinks(node);for(const node of entry.removedNodes)if(node.nodeType===1&&!node.isConnected)for(const el of node.querySelectorAll('[data-direct-src]')){directObserved.get(el)?.unobserve(el);directObserved.delete(el);if(el.onload&&el.getAttribute('src')&&!el.complete)el.onerror?.();el.onload=el.onerror=null;}}});
   document.addEventListener('DOMContentLoaded',()=>{observe();decorateLinks(document);mutation.observe(document.body,{childList:true,subtree:true});midiCleanup.observe(document.body,{childList:true,subtree:true});directMutation.observe(document.body,{childList:true,subtree:true});});
-  return {html,type,observe,imageLinks,directHTML,setDirect,get directEnabled(){return directEnabled;}};
+  return {html,type,observe,imageLinks,directHTML,setDirect,useSaved,get directEnabled(){return directEnabled;}};
 })();

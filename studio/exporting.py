@@ -116,6 +116,8 @@ def render(messages, fmt, channel, opts):
             if m.get('message_reference'):
                 lines.append('Reply to: ' + str(m['message_reference'].get('message_id', '')))
             lines.append(content_text(m.get('content', ''),m.get('emoji_assets'),fmt=='md'))
+            for url, local in m.get('linked_images',{}).items():
+                lines.append('[Saved image](%s)' % local if fmt=='md' else 'Saved image: '+local)
             for attachment in m.get('attachments', []):
                 url = attachment.get('local_path') or attachment.get('url', '')
                 if fmt == 'md':
@@ -145,6 +147,9 @@ def render(messages, fmt, channel, opts):
                 attachments.append('<a href="%s">📎 %s</a>' % (esc(safe_url, quote=True), label))
             attachments.append('<small>%s</small>' % esc(a.get('download_status','')))
         assets=m.get('emoji_assets',{})
+        for local in m.get('linked_images',{}).values():
+            if re.fullmatch(r'\.\./\.\./media/[a-f0-9]{64}', str(local)):
+                attachments.append('<a href="%s"><img loading="lazy" src="%s" alt="Saved linked image"></a>' % (local,local))
         reactions = ' '.join('%s ×%s' % (content_html('<:'+str(r['emoji'].get('name') or 'emoji')+':'+str(r['emoji']['id'])+'>',assets) if r.get('emoji',{}).get('id') else esc(r.get('emoji',{}).get('name') or '?'),r.get('count',0)) for r in m.get('reactions',[]))
         reply = m.get('message_reference', {}).get('message_id')
         color = m.get('author', {}).get('role_color', 0) if opts['role_colors'] else 0
@@ -167,6 +172,7 @@ class Exporter:
         from .avatars import Avatars
         self.avatars = Avatars(store)
         self.emojis = Emojis(store)
+        self.images = store.images
 
     def download_selected(self, task, control):
         aid, cid = task['attachment_id'], task['channel_id']
@@ -233,6 +239,7 @@ class Exporter:
             previous = db.execute('SELECT * FROM publications WHERE server_id=?', (server_id,)).fetchone()
         avatars = self.avatars.cached()
         emojis = self.emojis.cached()
+        images = self.images.saved()
         for channel in channels:
             if channel['id'] in affected and views.get(channel['id'],opts).get('include_avatars'):
                 self.avatars.queue([channel['id']])
@@ -244,7 +251,10 @@ class Exporter:
         picture_versions={key:saved['hash'] for key,saved in avatars.items() if key.split(':',1)[0] in pictured_users}
         with self.store.db() as db:
             emoji_ids={r[0] for r in db.execute('SELECT emoji_id FROM emoji_servers WHERE server_id=?',(server_id,))}
-        digest = fingerprint({'reader_schema':2,'server_name':server_name,'channels': [(c['id'], c['name'], c['generation'], c['history_done']) for c in channels], 'options': presentation,'avatars':picture_versions,'emojis':{eid:emojis[eid]['hash'] for eid in emoji_ids if eid in emojis}})
+        with self.store.db() as db:
+            image_keys = {r[0] for r in db.execute('SELECT DISTINCT url_key FROM image_refs WHERE server_id=?', (server_id,))}
+        images = {url:r for url,r in images.items() if r['url_key'] in image_keys}
+        digest = fingerprint({'reader_schema':3,'server_name':server_name,'channels': [(c['id'], c['name'], c['generation'], c['history_done']) for c in channels], 'options': presentation,'avatars':picture_versions,'emojis':{eid:emojis[eid]['hash'] for eid in emoji_ids if eid in emojis},'linked_images':{url:r['hash'] for url,r in images.items()}})
         target = destination / ('server_%s.zip' % server_id)
         if previous and previous['hash'] == digest and previous['path'] == str(target) and target.is_file():
             return {'path': str(target), 'unchanged': True, 'bytes': target.stat().st_size}
@@ -253,6 +263,7 @@ class Exporter:
         temp = Path(name)
         try:
             index, used_media, used_avatars, used_emojis, captured_emojis = [], set(), set(), set(), {}
+            used_images = set()
             with zipfile.ZipFile(temp, 'w', zipfile.ZIP_DEFLATED, compresslevel=4) as archive:
                 archive.writestr('README.txt', 'Discord Archive Studio\nOpen index.html to browse channels. JSON preserves stable message IDs.\nCaptured data may be partial during a paced export. Deleted messages and unseen edits are not recoverable.\n')
                 for channel in channels:
@@ -275,6 +286,13 @@ class Exporter:
                             continue
                         captured_emojis.update(references(m))
                         normalized_message = normalized(m, channel_opts, media, requests, avatars, emojis)
+                        if channel_opts['download_media']:
+                            from .linked_images import image_links
+                            linked = {url:'../../media/'+images[url]['hash'] for url in image_links(m.get('content',''))
+                                      if url in images and images[url]['received'] <= channel_opts['max_media_mb']*1000000}
+                            if linked:
+                                normalized_message['linked_images'] = linked
+                                used_images.update(value[6:] for value in linked.values())
                         used_emojis.update(path[6:] for path in normalized_message.get('emoji_assets',{}).values())
                         if normalized_message.get('author',{}).get('avatar_local_path'):
                             used_avatars.add(normalized_message['author']['avatar_local_path'][6:])
@@ -298,6 +316,9 @@ class Exporter:
                     archive.write(self.store.root/relative,relative)
                 for relative in used_emojis:
                     archive.write(self.store.root/relative,relative)
+                for relative in used_images:
+                    if relative.removeprefix('media/') not in written:
+                        archive.write(self.store.root/relative,relative)
                 archive.writestr('manifest.json', packed(manifest))
                 links = ''.join('<li><a href="%s">%s — %s (%s messages)</a></li>' % (html.escape(i['file'], quote=True), html.escape(i['channel']), i['format'].upper(), i['messages']) for i in index)
                 archive.writestr('index.html', '<!doctype html><meta charset="utf-8"><title>'+html.escape(server_name)+'</title><style>body{font:16px system-ui;background:#0c1220;color:#eee;padding:32px}a{color:#b6a4ff}li{margin:12px}</style><h1>'+html.escape(server_name)+'</h1><ul>'+links+'</ul>')

@@ -1,4 +1,17 @@
-DISCORD ARCHIVE STUDIO 1.6.0 — WINDOWS x64
+DISCORD ARCHIVE STUDIO 1.7.0 — WINDOWS x64
+
+NEW SINCE LAST READ / OFFLINE IMAGES / NEEDS ATTENTION / SEARCH OPERATORS
+Library has a New since last read filter and conversation counts. Visible
+messages advance the saved watermark; older backfill does not reset it.
+Choose Save offline below a linked PNG/JPEG/GIF image to save it manually.
+Images are capped at 10 MB and wait behind text exports. Repeated URLs and
+identical bytes reuse the cache. ZIP inclusion follows saved-file options.
+External ZIPs stay intact; the reader can use the shared local image cache.
+Needs attention reviews failures without probing blocked Discord resources.
+Search: from:Alice in:general has:image after:2026-01-01 file:name
+Quote names with spaces. Ctrl+Space shows operators; arrows/Enter select.
+Inline operators override matching filters. Reader searches stay in the chosen
+channel. before: includes the specified date, like the Through date filter.
 
 SILENT UPDATES AND INLINE IMAGE LINKS
 Settings > Application updates is on by default and checks daily while the app

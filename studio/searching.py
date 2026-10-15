@@ -1,6 +1,96 @@
 """Literal local search and a progressively populated metadata index."""
 import json
 import re
+from datetime import date
+
+
+def expand(params):
+    """Extract known operators only; URLs and quoted literal text remain literal."""
+    result = dict(params)
+    seen = set()
+    def operator(match):
+        name = match[1].lower()
+        value = (match[2] if match[2] is not None else match[3]).strip()
+        if not value or name in seen:
+            raise ValueError('Use one non-empty '+name+': filter.')
+        seen.add(name)
+        field = {'from': 'person', 'in': 'scope_channel', 'server': 'scope_server',
+                 'has': 'type', 'after': 'start', 'before': 'end', 'file': 'attachment'}[name]
+        if name == 'has':
+            value = {'attachment': 'any', 'attachments': 'any', 'images': 'image'}.get(value.lower(), value.lower())
+            if value not in ('image', 'video', 'audio', 'midi', 'file', 'any'):
+                raise ValueError('has: supports image, video, audio, midi, file or attachment.')
+        if name in ('before', 'after'):
+            try:
+                if not re.fullmatch(r'\d{4}-\d{2}-\d{2}',value): raise ValueError()
+                date.fromisoformat(value)
+            except ValueError:
+                raise ValueError(name+': needs a date such as 2026-01-31.') from None
+        result[field] = value
+        if name == 'from': result.pop('author', None)
+        return ''
+    def token(match):
+        found = re.fullmatch(r'(from|in|server|has|before|after|file):(?:"([^"]*)"|(\S+))', match[0], re.I)
+        return operator(found) if found else match[0]
+    result['q'] = re.sub(r'(?:[^\s"]+|"[^"]*")+', token,
+                         str(params.get('q') or '')[:500]).strip()
+    return result
+
+
+def scope_filter(params, *, zip_index=False, archive_name=''):
+    where, args = [], []
+    channel = params.get('scope_channel')
+    if channel:
+        column = 'm.channel' if zip_index else 'm.channel_id'
+        where.append(column+' IN (SELECT id FROM channels WHERE '+('id=?' if channel.isdigit() else 'name=? COLLATE NOCASE')+')')
+        args.append(channel.lstrip('#'))
+    server = params.get('scope_server')
+    if server:
+        if zip_index:
+            where.append('?=? COLLATE NOCASE'); args += [server, archive_name]
+        else:
+            where.append('m.channel_id IN (SELECT c.id FROM channels c JOIN servers s ON s.id=c.server_id WHERE '+('s.id=?' if server.isdigit() else 's.name=? COLLATE NOCASE')+')')
+            args.append(server)
+    return where, args
+
+
+def suggestions(store, reader, params):
+    operator = str(params.get('operator','')).lower()
+    query = str(params.get('value',''))[:100]
+    like = '%'+query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
+    archive = params.get('archive')
+    rows = []
+    if operator in ('has','before','after'):
+        values = ('image','video','audio','midi','file','attachment') if operator=='has' else (date.today().isoformat(),)
+        return {'suggestions':[dict(value=value,label=value,detail='Attachment type' if operator=='has' else 'YYYY-MM-DD')
+            for value in values if query.lower() in value.lower()]}
+    if archive:
+        from .reader_library import entry
+        if not entry(store, archive):
+            path, _, item = reader.index(archive)
+            import sqlite3
+            from contextlib import closing
+            with closing(sqlite3.connect(path)) as db:
+                if operator == 'in':
+                    rows = [dict(value=r[0],label=r[1],detail='Saved ZIP channel') for r in db.execute(
+                        "SELECT id,name FROM channels WHERE name LIKE ? ESCAPE '\\' OR id LIKE ? LIMIT 8",(like,like))]
+                elif operator == 'from':
+                    rows = [dict(value=r[0],label=r[1] or r[0],detail='Captured author · '+r[0]) for r in db.execute(
+                        "SELECT DISTINCT json_extract(raw,'$.author.id'),coalesce(json_extract(raw,'$.author.global_name'),json_extract(raw,'$.author.username'),json_extract(raw,'$.author.name')) name FROM messages WHERE name LIKE ? ESCAPE '\\' OR json_extract(raw,'$.author.id') LIKE ? LIMIT 8",(like,like))]
+                elif operator == 'server':
+                    rows = [dict(value=item['name'],label=item['name'],detail='Current archive')]
+            return {'suggestions':rows}
+    with store.db() as db:
+        if operator == 'from':
+            rows = [dict(value=r['id'],label=r['name'],detail='Captured author · '+r['id']) for r in db.execute(
+                "SELECT id,name FROM users WHERE name LIKE ? ESCAPE '\\' OR id LIKE ? OR id IN (SELECT user_id FROM author_names WHERE name LIKE ? ESCAPE '\\') ORDER BY name LIMIT 8",(like,like,like))]
+        elif operator == 'in':
+            rows = [dict(value=r['id'],label='# '+r['name'],detail=r['server']) for r in db.execute(
+                "SELECT c.id,c.name,s.name server FROM channels c JOIN servers s ON s.id=c.server_id WHERE c.name LIKE ? ESCAPE '\\' OR c.id LIKE ? ORDER BY c.name LIMIT 8",(like.lstrip('#'),like))]
+        elif operator == 'server':
+            rows = [dict(value=r['id'],label=r['name'],detail='Saved server') for r in db.execute(
+                "SELECT id,name FROM servers WHERE name LIKE ? ESCAPE '\\' OR id LIKE ? ORDER BY name LIMIT 8",(like,like))]
+    return {'suggestions':rows}
 
 
 def match_text(value, phrase=False):
@@ -80,6 +170,7 @@ def metadata_filter(params, *, zip_index=False):
                 where.append("(m.author_id IN (SELECT user_id FROM author_names WHERE name LIKE ? ESCAPE '\\') OR m.author_id IN (SELECT x.author_id FROM messages x WHERE x.rowid NOT IN (SELECT rowid FROM message_facets) AND ("+captured+" LIKE ? ESCAPE '\\')) OR m.author_id IN (SELECT id FROM users WHERE name LIKE ? ESCAPE '\\'))")
                 args += [literal(author)]*3
     if filename or group:
+        attachment_start = len(where)
         # JSON is the complete fallback for legacy caches; filenames and groups
         # are also indexed for current captures and progressively migrated rows.
         fields=[];values=[]
@@ -104,6 +195,11 @@ def metadata_filter(params, *, zip_index=False):
             fields.append('NOT '+clause if group=='file' else clause)
         where.append("EXISTS (SELECT 1 FROM json_each(m.raw,'$.attachments') j"+(' WHERE '+' AND '.join(fields) if fields else '')+')')
         args+=values
+        if group in ('image','any') or filename and not group:
+            clauses = where[attachment_start:]
+            del where[attachment_start:]
+            where.append('('+' AND '.join(clauses)+" OR image_link(json_extract(m.raw,'$.content'),?)=1)")
+            args.append(filename)
     for field,value,operator in [('timestamp' if not zip_index else 'stamp',params.get('start'),'>='),('timestamp' if not zip_index else 'stamp',params.get('end'),'<=')]:
         if value:
             where.append('m.'+field+operator+'?');args.append(str(value)+('T23:59:59.999999+00:00' if operator=='<=' and len(str(value))==10 else ''))
