@@ -1,0 +1,41 @@
+name: Publish Windows portable release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    runs-on: windows-latest
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+      - name: Install Windows Python 3.12 runtime
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+      - name: Verify Python regressions
+        shell: pwsh
+        run: python -m unittest discover -s tests -v
+      - name: Build portable and source ZIPs
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          python tools/build_release.py --version $version
+      - name: Publish release and verified ZIPs
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          make_latest: true
+          files: |
+            outputs/*-Portable.zip
+            outputs/*-Source.zip
+          fail_on_unmatched_files: true
