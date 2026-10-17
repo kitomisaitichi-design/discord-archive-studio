@@ -1,3 +1,5 @@
+**v1.7.1:** Adds seven-parent recursive Discord export auto-linking to the ZIP reader (ZIP, JSON, HTML, Markdown, TXT). Read-only source linking, no database replacement. All current 1.7 libraries keep their Data and Exports.
+
 # Discord Archive Studio
 
 Version 1.7 adds **New since last read**, manual **Save offline** controls for linked PNG/JPEG/GIF images, **Needs attention**, and local search autocomplete. Try `from:Alice in:general has:image after:2026-01-01`. Quote names with spaces; Ctrl+Space shows operators and arrow keys/Enter select suggestions. Inline operators override matching Library filter fields; reader searches remain within the selected channel. `before:` includes the specified day, matching the Through date filter.

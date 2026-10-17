@@ -12,7 +12,7 @@ import urllib.error
 import urllib.request
 import zipfile
 
-CURRENT_VERSION = '1.7.0'
+CURRENT_VERSION = '1.7.1'
 REPOSITORY = 'kitomisaitichi-design/discord-archive-studio'
 LATEST = 'https://api.github.com/repos/'+REPOSITORY+'/releases/latest'
 MAX_DOWNLOAD = 150*1024*1024

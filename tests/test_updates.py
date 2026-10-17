@@ -55,12 +55,12 @@ class UpdatesTests(unittest.TestCase):
 
     def test_checked_download_and_public_asset_scope(self):
         # The fixture must be newer than CURRENT_VERSION to exercise staging.
-        archive,digest,_,_=package(self.root,release_version='1.7.1');raw=archive.read_bytes()
+        archive,digest,_,_=package(self.root,release_version='1.7.2');raw=archive.read_bytes()
         (self.root/'MANIFEST.json').write_text('{}');(self.root/'runtime').mkdir();(self.root/'runtime/pythonw.exe').write_bytes(b'old')
         self.updater.portable=True
-        asset={'name':'Discord-Archive-Studio-v1.7.1-Portable.zip','state':'uploaded','size':len(raw),'digest':digest,
-               'browser_download_url':'https://github.com/'+REPOSITORY+'/releases/download/v1.7.1/Discord-Archive-Studio-v1.7.1-Portable.zip'}
-        release={'tag_name':'v1.7.1','assets':[asset]}
+        asset={'name':'Discord-Archive-Studio-v1.7.2-Portable.zip','state':'uploaded','size':len(raw),'digest':digest,
+               'browser_download_url':'https://github.com/'+REPOSITORY+'/releases/download/v1.7.2/Discord-Archive-Studio-v1.7.2-Portable.zip'}
+        release={'tag_name':'v1.7.2','assets':[asset]}
         class Response(io.BytesIO):
             headers={'ETag':'"fixture"'}
         with patch('urllib.request.urlopen',side_effect=[Response(json.dumps(release).encode()),Response(raw)]) as network:
