@@ -49,15 +49,47 @@ class DiscoveryTests(unittest.TestCase):
     def test_unrecorded_zip_depth_limits_exclusions_and_scan_cache(self):
         inside=self.zip(self.parent/'old'/'one'/'two'/'three'/'four'/'five'/'six.zip')
         outside=self.zip(self.parent/'old'/'one'/'two'/'three'/'four'/'five'/'six'/'seven.zip')
-        # Parent depth six includes files in six descendant directories, not seven.
-        too_deep=self.zip(self.parent/'old'/'one'/'two'/'three'/'four'/'five'/'six'/'seven'/'hidden.zip')
+        deeply_nested=self.zip(self.parent/'old'/'one'/'two'/'three'/'four'/'five'/'six'/'seven'/'hidden.zip')
         self.zip(self.app/'Data'/'private.zip');self.zip(self.parent/'Discord-Archive-Studio-v1.3.0-Source.zip')
         items=self.reader.catalogue();paths={e['path'] for e in items}
-        self.assertIn(str(inside.resolve()),paths);self.assertNotIn(str(outside.resolve()),paths);self.assertNotIn(str(too_deep.resolve()),paths)
+        self.assertIn(str(inside.resolve()),paths);self.assertIn(str(outside.resolve()),paths)
+        self.assertIn(str(deeply_nested.resolve()),paths)
         self.assertFalse(any('private.zip' in p or '-Source.zip' in p for p in paths))
         with patch('studio.zipreader.os.walk',side_effect=AssertionError('Unchanged folder inventory rescanned')):self.reader.catalogue()
         self.zip(self.parent/'new.zip');self.assertFalse(any(e['path'].endswith('new.zip') for e in self.reader.catalogue()))
         self.assertTrue(any(e['path'].endswith('new.zip') for e in self.reader.catalogue(refresh=True)))
+    def test_loose_discord_json_export_is_linked_without_import_or_copy(self):
+        loose=self.parent/'Old exports'/'general.json'
+        loose.parent.mkdir(parents=True)
+        loose.write_text(json.dumps({'guild':{'id':SID,'name':'Old server'},
+            'channel':{'id':CID,'name':'general'},'messages':[message(9001,'linked loose export')]}),encoding='utf8')
+        rows=[e for e in self.reader.catalogue(refresh=True) if e['path']==str(loose.resolve())]
+        self.assertEqual(len(rows),1)
+        self.assertEqual(rows[0]['source'],'discovered')
+        with patch('studio.discord.Discord.get',side_effect=AssertionError('No external network')):
+            overview=self.reader.query(rows[0]['id'],'overview',{})
+            self.assertEqual(overview['channels'][0]['messages'],1)
+            page=self.reader.query(rows[0]['id'],'messages',{'channel':CID})
+        self.assertEqual(page['messages'][0]['content'],'linked loose export')
+        self.assertEqual(self.store.stats()['messages'],0)
+        self.assertTrue(loose.exists())
+        unrelated=self.parent/'App'/'service_config.json'
+        unrelated.write_text('{"url":"example","mode":"discord"}',encoding='utf8')
+        self.assertNotIn(str(unrelated.resolve()),{e['path'] for e in self.reader.catalogue(refresh=True)})
+
+    def test_seven_ancestor_levels_link_without_copy_and_eighth_does_not(self):
+        origin=self.parent/'ancestor'
+        nested=origin.joinpath(*['level'+str(i) for i in range(8)])
+        nested.mkdir(parents=True)
+        located=self.zip(origin/'level0'/'level1'/'near-ancestor.zip')
+        too_far=self.zip(origin/'one-level-too-far.zip')
+        reader=ZipReader(self.store,app_root=nested,scan_parent=True)
+        discovered={e['path'] for e in reader.catalogue() if e['source']=='discovered'}
+        self.assertIn(str(located.resolve()),discovered)
+        self.assertNotIn(str(too_far.resolve()),discovered)
+        self.assertFalse((self.store.root/'reader-archives').exists())
+        self.assertEqual(self.store.stats()['messages'],0)
+
     def test_known_path_dedup_destination_change_relocation_and_unrelated_zip(self):
         self.store.upsert(CID,[message(9001)]);result=self.exporter.publish(SID,options(None),self.app/'Exports')
         self.assertEqual(len([e for e in self.reader.catalogue() if e['path']==result['path']]),1)

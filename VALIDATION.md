@@ -1,3 +1,16 @@
+
+## 1.7 discovery continuation — October 2026
+
+The archive reader now links message ZIPs and loose Discord JSON/HTML/Markdown/TXT
+exports from the configured destination, app directory and up to seven parent
+folders with recursive descendants (bounded at 5,000 folders and 1,000 entries).
+Scans skip private Data/runtime, symlinks, junctions and online-only placeholders.
+Discovered exports remain in place; their reader indexes are separate from the
+canonical chat database. Regression tests cover seven parents, rejection beyond
+that boundary, deep subfolder discovery, in-place loose JSON reading, deduplication,
+cache/refresh and no source rewrite. The VBS launcher has seven-level parent and
+descendant tests. Preserve the populated 1.7 Data and Exports when updating.
+
 # Validation — 2026-10-15
 
 1.7.0: eleven new cases and fourteen affected reader/manual-media cases pass. They cover durable monotone read marks, old-history backfill, frozen unread paging, literal/quoted operators, saved-name autocomplete, native/ZIP searches, manual URL validation, URL/byte deduplication, ZIP asset round trips, private/redirect target rejection, queue caps, text-work deferral, missing files and blocked retry restrictions. An initial test called a nonexistent reader.register helper; using the existing upload API resolved those two fixture errors. Existing direct-image and reader frontend simulations pass; the unrelated full suite was not repeated.

@@ -1,5 +1,5 @@
 Option Explicit
-Dim shell, files, base, command, start, parent, matches, visited, capped, locateOnly, arg, choices, key, pick, index
+Dim shell, files, base, command, start, parent, matches, visited, capped, locateOnly, arg, choices, key, pick, index, climb, level
 Set shell = CreateObject("WScript.Shell")
 Set files = CreateObject("Scripting.FileSystemObject")
 Set matches = CreateObject("Scripting.Dictionary")
@@ -10,16 +10,22 @@ For Each arg In WScript.Arguments
 Next
 start = files.GetParentFolderName(WScript.ScriptFullName)
 parent = files.GetParentFolderName(start)
-If IsStudio(start) Then
-  base = start
-ElseIf IsStudio(parent) Then
-  base = parent
-Else
-  FindStudios parent, 0
+climb = start
+For level = 0 To 7
+  If IsStudio(climb) Then
+    base = climb
+    Exit For
+  End If
+  parent = files.GetParentFolderName(climb)
+  If parent = "" Or parent = climb Then Exit For
+  climb = parent
+Next
+If base = "" Then
+  FindStudios files.GetParentFolderName(start), 0
   If capped Then
     Fail "The bounded folder search reached 5,000 folders. Put the launcher beside the app, or inside its app folder."
   ElseIf matches.Count = 0 Then
-    Fail "No complete app was found beside this launcher, in its parent, or within six subfolder levels. Extract the Portable ZIP or move the launcher closer."
+    Fail "No complete app was found beside this launcher, in its parent, or within seven subfolder levels. Extract the Portable ZIP or move the launcher closer."
   ElseIf matches.Count = 1 Then
     base = matches.Keys()(0)
   Else
@@ -59,7 +65,7 @@ End Function
 
 Sub FindStudios(path, depth)
   Dim folder, child, name
-  If capped Or depth > 6 Then Exit Sub
+  If capped Or depth > 7 Then Exit Sub
   visited = visited + 1
   If visited > 5000 Then
     capped = True
@@ -76,7 +82,7 @@ Sub FindStudios(path, depth)
     If Not matches.Exists(path) Then matches.Add path, path
     Exit Sub
   End If
-  If depth = 6 Then Exit Sub
+  If depth = 7 Then Exit Sub
   For Each child In folder.SubFolders
     name = LCase(child.Name)
     If name <> "data" And name <> "exports" And name <> "runtime" And name <> ".git" And name <> ".work" And name <> "recovery" And name <> "logs" Then FindStudios child.Path, depth + 1

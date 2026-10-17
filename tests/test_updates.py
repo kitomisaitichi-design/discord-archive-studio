@@ -14,15 +14,15 @@ from studio.updates import Updater,validate_package,safe_name,version,REPOSITORY
 from studio.update_installer import install,replace_payload,rollback
 
 
-def package(root,extra=None):
+def package(root,extra=None,release_version="1.7.0"):
     files={'app.py':b'new app','studio/server.py':b'new server','studio/update_installer.py':b'helper',
            'runtime/python.exe':b'runtime','runtime/pythonw.exe':b'windowless'}
     files.update(extra or {})
-    manifest={'app':'Discord Archive Studio','version':'1.7.0','files':{name:{'bytes':len(raw),'sha256':hashlib.sha256(raw).hexdigest()} for name,raw in files.items()}}
+    manifest={'app':'Discord Archive Studio','version':release_version,'files':{name:{'bytes':len(raw),'sha256':hashlib.sha256(raw).hexdigest()} for name,raw in files.items()}}
     archive=root/'package.zip'
     with zipfile.ZipFile(archive,'w') as z:
-        for name,raw in files.items():z.writestr('Discord-Archive-Studio-v1.7.0-Portable/'+name,raw)
-        z.writestr('Discord-Archive-Studio-v1.7.0-Portable/MANIFEST.json',json.dumps(manifest))
+        for name,raw in files.items():z.writestr('Discord-Archive-Studio-v'+release_version+'-Portable/'+name,raw)
+        z.writestr('Discord-Archive-Studio-v'+release_version+'-Portable/MANIFEST.json',json.dumps(manifest))
     return archive,'sha256:'+hashlib.sha256(archive.read_bytes()).hexdigest(),manifest,files
 
 
@@ -54,12 +54,13 @@ class UpdatesTests(unittest.TestCase):
         with self.assertRaises(ValueError):validate_package(archive,'1.7.0',digest)
 
     def test_checked_download_and_public_asset_scope(self):
-        archive,digest,_,_=package(self.root);raw=archive.read_bytes()
+        # The fixture must be newer than CURRENT_VERSION to exercise staging.
+        archive,digest,_,_=package(self.root,release_version='1.7.1');raw=archive.read_bytes()
         (self.root/'MANIFEST.json').write_text('{}');(self.root/'runtime').mkdir();(self.root/'runtime/pythonw.exe').write_bytes(b'old')
         self.updater.portable=True
-        asset={'name':'Discord-Archive-Studio-v1.7.0-Portable.zip','state':'uploaded','size':len(raw),'digest':digest,
-               'browser_download_url':'https://github.com/'+REPOSITORY+'/releases/download/v1.7.0/Discord-Archive-Studio-v1.7.0-Portable.zip'}
-        release={'tag_name':'v1.7.0','assets':[asset]}
+        asset={'name':'Discord-Archive-Studio-v1.7.1-Portable.zip','state':'uploaded','size':len(raw),'digest':digest,
+               'browser_download_url':'https://github.com/'+REPOSITORY+'/releases/download/v1.7.1/Discord-Archive-Studio-v1.7.1-Portable.zip'}
+        release={'tag_name':'v1.7.1','assets':[asset]}
         class Response(io.BytesIO):
             headers={'ETag':'"fixture"'}
         with patch('urllib.request.urlopen',side_effect=[Response(json.dumps(release).encode()),Response(raw)]) as network:

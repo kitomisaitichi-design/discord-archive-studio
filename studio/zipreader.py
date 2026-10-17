@@ -98,16 +98,39 @@ class ZipReader:
         self.discovery_until = 0
         self.discovery_warnings = []
 
+    @staticmethod
+    def _looks_like_discord_document(prefix,kind):
+        if kind=='.json':
+            return bool(re.search(rb'"messages"\s*:\s*\[',prefix) and b'"channel"' in prefix)
+        if kind in ('.html','.htm'):
+            return b'chatlog__message-container' in prefix or bool(re.search(rb'<article\s+id="m\d+',prefix))
+        if kind in ('.md','.txt'):
+            return bool(re.search(rb'^(?:### |\[).*?\xc2\xb7 \d{4}-\d\d-\d\d',prefix,re.M)
+                        or re.search(rb'^\[\d{1,2}/\d{1,2}/\d{4} .*?[AP]M\]',prefix,re.M))
+        return False
+
     def discover(self, refresh=False):
-        app=self.app_root
+        app=self.app_root.resolve()
         roots=[Path(self.store.setting('destination',str(self.store.root.parent/'Exports'))).expanduser(),app]
-        if self.scan_parent:roots.append(app.parent)
-        signature=tuple(os.path.normcase(str(p.resolve())) for p in roots)
+        if self.scan_parent:
+            # Check the original portable folder and SEVEN ancestor levels. This
+            # survives moved installs, downloads and exports saved beside older
+            # copies. Never make a second SQLite library or copy a discovered ZIP.
+            parent=app
+            for _ in range(7):
+                if parent.parent == parent: break
+                parent=parent.parent
+                roots.append(parent)
+        roots=list(dict.fromkeys(Path(p).resolve() for p in roots))
+        signature=tuple(os.path.normcase(str(p)) for p in roots)
         with self.lock:
             if not refresh and signature==self.discovery_roots and time.monotonic()<self.discovery_until:
                 return list(self.discovery)
             found,seen,warnings=[],set(),[]
-            skip={'data','runtime','.git','.work','.updates','recovery','logs','__pycache__','node_modules','reader-cache','reader-archives'}
+            skip={'data','runtime','.git','.work','.updates','recovery','logs','__pycache__',
+                  'node_modules','reader-cache','reader-archives','.venv','venv','site-packages',
+                  'appdata','windows','program files','program files (x86)','$recycle.bin',
+                  'system volume information','packages','.cache'}
             visited=0
             def scan_error(error):warnings.append('Folder unavailable: '+str(error.filename))
             for root in roots:
@@ -118,36 +141,51 @@ class ZipReader:
                     seen.add(normalized);visited+=1
                     if visited>5000:
                         warnings.append('Discovery reached its 5,000-folder limit.');dirs[:]=[];break
-                    depth=len(path.relative_to(root).parts)
-                    dirs[:]=sorted(d for d in dirs if depth<6 and d.casefold() not in skip and not (path/d).is_symlink() and not getattr(path/d,'is_junction',lambda:False)())
+                    # Descend recursively rather than stopping after six levels.
+                    # Cycles, junctions and giant system/dependency directories
+                    # are excluded; the global 5,000-directory cap still applies.
+                    dirs[:]=sorted(d for d in dirs if d.casefold() not in skip and not (path/d).is_symlink() and not getattr(path/d,'is_junction',lambda:False)())
+                    # On Windows the seventh ancestor can be C:\ itself. Treat
+                    # system/profile roots as direct-file lookups rather than
+                    # crawling an entire volume or unrelated app credentials.
+                    if path==root and (path==Path(path.anchor) or path.name.casefold() in {'users','appdata'}):
+                        dirs[:]=[]
+                    if path==root and path==Path.home():
+                        dirs[:]=[d for d in dirs if d.casefold() in {'downloads','desktop','documents'}]
                     for name in sorted(files):
-                        if not name.lower().endswith('.zip') or re.match(r'Discord-Archive-Studio-v\d',name,re.I):continue
+                        kind=Path(name).suffix.lower()
+                        if kind not in ('.zip','.json','.html','.htm','.md','.txt') or re.match(r'Discord-Archive-Studio-v\d',name,re.I):continue
                         candidate=path/name
                         if candidate.is_symlink():continue
                         try:
-                            if getattr(candidate.stat(),'st_file_attributes',0)&(0x1000|0x40000|0x400000):
-                                warnings.append('Online-only ZIP skipped until made available locally: '+name);continue
+                            stat=candidate.stat()
+                            if getattr(stat,'st_file_attributes',0)&(0x1000|0x40000|0x400000):
+                                warnings.append('Online-only archive skipped until available locally: '+name);continue
                             title=None
-                            with zipfile.ZipFile(candidate) as archive:
-                                names=archive.namelist()
-                                if len(names)>10000:continue
-                                if 'manifest.json' in names and archive.getinfo('manifest.json').file_size<=262144:
-                                    manifest=json.loads(archive.read('manifest.json'))
-                                    if isinstance(manifest,dict) and str(manifest.get('schema','')).startswith('discord-archive-studio/'):
-                                        title=manifest.get('server_name') or name
-                                if not title:
-                                    for entry in archive.infolist():
-                                        if entry.filename.lower().endswith(('.json','.html','.htm','.md','.txt')) and entry.file_size<=MAX_ENTRY:
-                                            with archive.open(entry) as source:prefix=source.read(65536)
-                                            if re.search(rb'"messages"\s*:\s*\[',prefix) and b'"channel"' in prefix:
-                                                title=name;break
-                                            if b'chatlog__message-container' in prefix or re.search(rb'<article\s+id="m\d+',prefix) or re.search(rb'^(?:### |\[).*?\xc2\xb7 \d{4}-\d\d-\d\d',prefix,re.M) or re.search(rb'^\[\d{1,2}/\d{1,2}/\d{4} .*?[AP]M\]',prefix,re.M):
-                                                title=name;break
+                            if kind=='.zip':
+                                with zipfile.ZipFile(candidate) as archive:
+                                    names=archive.namelist()
+                                    if len(names)>10000:continue
+                                    if 'manifest.json' in names and archive.getinfo('manifest.json').file_size<=262144:
+                                        manifest=json.loads(archive.read('manifest.json'))
+                                        if isinstance(manifest,dict) and str(manifest.get('schema','')).startswith('discord-archive-studio/'):
+                                            title=manifest.get('server_name') or name
+                                    if not title:
+                                        for entry in archive.infolist():
+                                            if entry.filename.lower().endswith(('.json','.html','.htm','.md','.txt')) and entry.file_size<=MAX_ENTRY:
+                                                with archive.open(entry) as source:prefix=source.read(65536)
+                                                if self._looks_like_discord_document(prefix,Path(entry.filename).suffix.lower()):
+                                                    title=name;break
+                            elif 0 < stat.st_size <= MAX_ENTRY:
+                                # Detect loose DiscordChatExporter/Studio exports in
+                                # place, WITHOUT importing or copying the file.
+                                with candidate.open('rb') as source:prefix=source.read(65536)
+                                if self._looks_like_discord_document(prefix,kind):title=name
                             if title:
-                                stat=candidate.stat();found.append({'path':str(candidate.resolve()),'name':str(title),'source':'discovered','size':stat.st_size,'updated':stat.st_mtime,'folder':str(path)})
+                                found.append({'path':str(candidate.resolve()),'name':str(title),'source':'discovered','size':stat.st_size,'updated':stat.st_mtime,'folder':str(path)})
                             if len(found)>=1000:break
-                        except (OSError,ValueError,zipfile.BadZipFile,RuntimeError):
-                            warnings.append('Not a readable message ZIP: '+name)
+                        except (OSError,ValueError,zipfile.BadZipFile,RuntimeError,json.JSONDecodeError):
+                            warnings.append('Not a readable Discord archive: '+name)
                     if len(found)>=1000:break
                 if visited>5000 or len(found)>=1000:break
             self.discovery,self.discovery_roots,self.discovery_until=found,signature,time.monotonic()+60
@@ -223,8 +261,17 @@ class ZipReader:
             try:
                 # Hold the publisher lock only for the snapshot, not parsing/paging.
                 with os.fdopen(handle, 'wb') as output, self.store.archive_lock:
-                    with path.open('rb') as source:
-                        shutil.copyfileobj(source, output, 1024*1024)
+                    if path.suffix.lower()=='.zip':
+                        with path.open('rb') as source:
+                            shutil.copyfileobj(source, output, 1024*1024)
+                    else:
+                        # A transient ZIP lets the existing safe, paged reader
+                        # parse standalone JSON/HTML/MD/TXT exports unchanged.
+                        # Only the derived index cache persists; source stays put.
+                        if path.stat().st_size > MAX_ENTRY:
+                            raise ValueError('The Discord export exceeds the 128 MB document limit.')
+                        with zipfile.ZipFile(output,'w',zipfile.ZIP_STORED) as wrapper:
+                            wrapper.write(path,arcname=path.name)
                 with snapshot.open('rb') as source:
                     digest = hashlib.file_digest(source, 'sha256').hexdigest()
                 target = self.root / (digest+'.sqlite3')

@@ -34,8 +34,9 @@ Download the **Portable ZIP** from [Releases](https://github.com/kitomisaitichi-
 - Scrollable queues with drag grips and keyboard arrows, searchable server names, and a continuous reading pane.
 - A People directory for selecting DM contacts or friends, bulk queueing available chats, and adding independent adaptive schedules.
 - History shows saved conversation counts, including partial batches, with direct reading links. Schedules supports search, selection, bulk pause/enable/removal, clear all and undo.
-- The native VBS launcher supports folder moves and bounded fallback discovery through six subfolder levels, with an explicit choice among multiple copies.
+- The native VBS launcher supports folder moves and bounded fallback discovery through seven subfolder levels and seven parent levels, with an explicit choice among multiple copies.
 - One current ZIP per server, verified before atomic replacement. Unchanged content retains the existing file and timestamp.
+- Discord export ZIPs and loose JSON/HTML/Markdown/TXT chat exports automatically appear in the reader from the app folder, configured destination, and up to seven parent levels with recursive descendant scanning (bounded to 5,000 folders/1,000 archives). They remain linked in place; no canonical SQLite import or duplicate archive copy happens. Refresh forces a new scan. The current live library stays separate from other installed Studio copies.
 
 Desktop reconnect uses the existing local session. Browser reconnect requires one-time installation and pairing of the included connector; its port must match the address shown in app Settings.
 

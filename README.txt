@@ -88,9 +88,11 @@ grouped when downloads drain, or about once per minute during a longer batch.
 No message-history or server-member request is needed for rendering.
 
 START
-The VBS first checks its own folder and immediate parent. If separated from the
-app, it searches the parent tree through six subfolder levels, skipping private
-data, runtime folders and junctions. Multiple copies require an explicit choice.
+The VBS checks its own folder and up to seven parent folders for the app.
+If separated, it searches through seven descendant folder levels, skipping
+private data, runtime folders and junctions. Multiple copies require an
+explicit choice. The archive reader separately scans exports up to seven
+parent levels and recursively below them, with a bounded directory budget.
 Moving the whole extracted folder keeps the app and Data together; a custom
 export destination remains the folder you selected until you change it.
 
@@ -312,12 +314,13 @@ The existing ChatGPT exporter/viewer files were not modified.
 ZIP MESSAGE EXPLORER (1.3)
 Saved library entries now appear automatically and reuse the working SQLite
 search/index directly, including saved messages outside a filtered ZIP view.
-Existing message ZIPs are discovered from the destination, app folder and parent
-tree through six levels. Inventory is cached for one minute; Refresh list/ZIP
-forces discovery. Private data/runtime/recovery folders, junctions, app release
+Existing message ZIPs and standalone Discord JSON, HTML, Markdown and TXT
+exports are discovered in the destination, app folder, up to seven parent
+levels and recursive subfolders (capped at 5,000 folders/1,000 archives).
+Inventory is cached for one minute; Refresh list/ZIP forces discovery. Private data/runtime/recovery folders, junctions, app release
 packages and online-only placeholders are skipped. Archives are read in place.
 Open outside ZIP remains optional for files outside those roots. No import or
-Discord history request is needed for existing indexed messages or local ZIPs.
+Discord history request is needed for existing indexed messages or local exports.
 Choose ZIP reader in the left menu, or Read ZIP in History. Each archive opens
 in its own browser tab, with channel selection, calendar activity, hour jumps,
 search by words/author, and a continuous timeline. Scroll or use Earlier/Later.

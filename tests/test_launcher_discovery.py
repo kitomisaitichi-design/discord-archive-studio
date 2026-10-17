@@ -20,12 +20,22 @@ class NativeDiscoveryTests(unittest.TestCase):
     def test_containing_app_survives_a_whole_folder_move(self):
         app=self.studio(self.launcher.parent);moved=self.root/'Moved app';app.rename(moved);self.launcher=moved/self.launcher.name
         result=self.locate();self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(result.stdout.strip(),str(moved))
-    def test_depth_six_is_found_and_depth_seven_is_not(self):
-        deep=self.studio(self.root.joinpath(*['level'+str(n) for n in range(6)]))
+    def test_depth_seven_is_found_and_depth_eight_is_not(self):
+        deep=self.studio(self.root.joinpath(*['level'+str(n) for n in range(7)]))
         result=self.locate();self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(result.stdout.strip(),str(deep))
-        deeper=deep/'level6';deeper.mkdir()
+        deeper=deep/'level7';deeper.mkdir()
         for name in ('runtime','studio','web','app.py'):shutil.move(str(deep/name),str(deeper/name))
         result=self.locate();self.assertEqual(result.returncode,1,result.stdout)
+    def test_app_can_be_found_seven_parents_above_launcher(self):
+        app=self.studio(self.root/'Home')
+        launcher_dir=app.joinpath(*['child'+str(i) for i in range(7)])
+        launcher_dir.mkdir(parents=True)
+        shutil.copy2(self.launcher,launcher_dir/self.launcher.name)
+        self.launcher=launcher_dir/self.launcher.name
+        result=self.locate()
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertEqual(result.stdout.strip(),str(app))
+
     def test_multiple_copies_require_an_explicit_choice(self):
         self.studio(self.root/'One');self.studio(self.root/'Two')
         result=self.locate();self.assertEqual(result.returncode,2,result.stderr);self.assertIn('More than one',result.stdout)
